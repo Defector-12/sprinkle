@@ -54,4 +54,36 @@ describe('extractArticle', () => {
     expect(article.isPartial).toBe(true);
     expect(article.blocks).toHaveLength(1);
   });
+
+  it('uses document metadata fallbacks and handles lists, quotes, and lazy images', () => {
+    document.title = 'Fallback document title';
+    document.body.innerHTML = `
+      <div role="main">
+        <p aria-hidden="true">Hidden utility text</p>
+        <ul><li>First retrieval step</li><li>Second retrieval step</li></ul>
+        <blockquote>Context changes the meaning of a term.</blockquote>
+        <p>${'Readable content '.repeat(8)}</p>
+        <img data-src="/lazy.png">
+        <img data-src="/lazy.png">
+        <img src="http://[invalid">
+        <h2>Later section</h2>
+      </div>
+    `;
+
+    const article = extractArticle(document, 'https://example.com/guide');
+
+    expect(article.title).toBe('Fallback document title');
+    expect(article.blocks.map((block) => block.type)).toEqual([
+      'list',
+      'quote',
+      'paragraph',
+      'heading',
+    ]);
+    expect(article.blocks.map((block) => block.text).join(' ')).not.toContain(
+      'Hidden utility text',
+    );
+    expect(article.images).toHaveLength(2);
+    expect(article.images[0]?.src).toBe('https://example.com/lazy.png');
+    expect(article.images[1]?.src).toBe('http://[invalid');
+  });
 });

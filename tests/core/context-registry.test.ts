@@ -78,4 +78,57 @@ describe('ContextRegistry', () => {
     expect(registry.listForTab(3)).toEqual([]);
     expect(registry.listForTab(4)).toHaveLength(1);
   });
+
+  it('tracks parsing, partial content, focus, and explicit clearing', () => {
+    const registry = new ContextRegistry();
+    const parsing = registry.setStatus(
+      3,
+      article.url,
+      article.title,
+      'parsing',
+      'Reading',
+    );
+    expect(parsing).toEqual(
+      expect.objectContaining({ status: 'parsing', warning: 'Reading' }),
+    );
+
+    const partial = registry.setArticle(3, {
+      ...article,
+      isPartial: true,
+    });
+    expect(partial).toEqual(
+      expect.objectContaining({
+        status: 'partial',
+        warning: '当前页面只读取到部分内容',
+      }),
+    );
+
+    const focused = registry.setFocus(3, article.url, article.title, {
+      type: 'text',
+      text: 'current article',
+      section: 'Overview',
+    });
+    expect(focused.focus).toEqual(
+      expect.objectContaining({ type: 'text', section: 'Overview' }),
+    );
+
+    const cleared = registry.clearPage(3, article.url, article.title);
+    expect(cleared.status).toBe('unactivated');
+    expect(registry.list()).toEqual([cleared]);
+  });
+
+  it('replaces messages and rejects message writes for missing pages', () => {
+    const registry = new ContextRegistry();
+    registry.setArticle(3, article);
+
+    expect(
+      registry.replaceMessages(3, article.url, [message]).messages,
+    ).toEqual([message]);
+    expect(() =>
+      registry.appendMessage(9, 'https://example.com/missing', message),
+    ).toThrow('Page context does not exist');
+    expect(() =>
+      registry.replaceMessages(9, 'https://example.com/missing', []),
+    ).toThrow('Page context does not exist');
+  });
 });

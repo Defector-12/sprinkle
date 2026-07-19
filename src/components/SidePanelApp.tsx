@@ -77,6 +77,38 @@ function EmptyState({
   );
 }
 
+function FailedState({
+  busy,
+  onRetry,
+}: {
+  busy: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <section className="empty-state" aria-labelledby="failed-state-title">
+      <div className="empty-state__mark" aria-hidden="true">
+        <Scan size={24} strokeWidth={1.6} />
+      </div>
+      <p className="eyebrow">需要重试</p>
+      <h2 id="failed-state-title">页面读取失败</h2>
+      <p>页面结构可能还没有加载完成。刷新网页后重新读取，通常可以恢复。</p>
+      <button
+        className="primary-button"
+        type="button"
+        onClick={onRetry}
+        disabled={busy}
+      >
+        {busy ? (
+          <LoaderCircle className="spin" size={17} aria-hidden="true" />
+        ) : (
+          <Scan size={17} aria-hidden="true" />
+        )}
+        {busy ? '正在重试' : '重新读取页面'}
+      </button>
+    </section>
+  );
+}
+
 function MessageList({ context }: { context: PageContext }) {
   if (!context.messages.length) {
     return (
@@ -247,6 +279,8 @@ export function SidePanelApp({ bridge }: SidePanelAppProps) {
 
       {context.status === 'unactivated' ? (
         <EmptyState busy={busy} onActivate={() => void activatePage()} />
+      ) : context.status === 'failed' ? (
+        <FailedState busy={busy} onRetry={() => void activatePage()} />
       ) : context.status === 'parsing' ? (
         <section className="reading-state" aria-live="polite">
           <LoaderCircle className="spin" size={22} aria-hidden="true" />

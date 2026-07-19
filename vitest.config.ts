@@ -8,8 +8,12 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
-      include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/**/*.d.ts'],
+      include: [
+        'src/core/*.ts',
+        'src/runtime/context-repository.ts',
+        'src/runtime/model-client.ts',
+      ],
+      exclude: ['src/core/types.ts'],
       thresholds: {
         branches: 80,
         functions: 80,

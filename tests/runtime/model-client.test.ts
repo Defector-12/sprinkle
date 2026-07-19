@@ -102,4 +102,91 @@ describe('OpenAiCompatibleModelClient', () => {
     expect(error).toEqual(expect.objectContaining({ code: 'PROVIDER_ERROR' }));
     expect(JSON.stringify(error)).not.toContain('private-key');
   });
+
+  it('normalizes network and malformed response failures', async () => {
+    const networkClient = new OpenAiCompatibleModelClient(
+      {
+        endpoint: 'https://api.example.com/chat/completions',
+        model: 'vision-model',
+      },
+      vi.fn().mockRejectedValue(new Error('socket failed')),
+    );
+    await expect(networkClient.complete('key', request)).rejects.toEqual(
+      expect.objectContaining({ code: 'NETWORK_ERROR' }),
+    );
+
+    const malformedClient = new OpenAiCompatibleModelClient(
+      {
+        endpoint: 'https://api.example.com/chat/completions',
+        model: 'vision-model',
+      },
+      vi.fn().mockResolvedValue(new Response('not-json', { status: 200 })),
+    );
+    await expect(malformedClient.complete('key', request)).rejects.toEqual(
+      expect.objectContaining({ code: 'INVALID_RESPONSE' }),
+    );
+  });
+
+  it('handles provider errors without JSON and empty successful answers', async () => {
+    const plainErrorClient = new OpenAiCompatibleModelClient(
+      {
+        endpoint: 'https://api.example.com/chat/completions',
+        model: 'vision-model',
+      },
+      vi.fn().mockResolvedValue(new Response('unavailable', { status: 503 })),
+    );
+    await expect(plainErrorClient.complete('key', request)).rejects.toEqual(
+      expect.objectContaining({
+        code: 'PROVIDER_ERROR',
+        status: 503,
+      }),
+    );
+
+    const emptyAnswerClient = new OpenAiCompatibleModelClient(
+      {
+        endpoint: 'https://api.example.com/chat/completions',
+        model: 'vision-model',
+      },
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: '   ' } }] }),
+          { status: 200 },
+        ),
+      ),
+    );
+    await expect(emptyAnswerClient.complete('key', request)).rejects.toEqual(
+      expect.objectContaining({ code: 'INVALID_RESPONSE' }),
+    );
+  });
+
+  it('joins text parts from multimodal provider responses', async () => {
+    const client = new OpenAiCompatibleModelClient(
+      {
+        endpoint: 'https://api.example.com/chat/completions',
+        model: 'vision-model',
+      },
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: [
+                    { type: 'text', text: 'First' },
+                    { type: 'image', image: 'ignored' },
+                    { type: 'text', text: 'Second' },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    await expect(client.complete('key', request)).resolves.toBe(
+      'First\nSecond',
+    );
+  });
 });

@@ -106,6 +106,10 @@ export class ConversationArchive {
       : [];
   }
 
+  async delete(url: string): Promise<void> {
+    await this.storage.remove(conversationStorageKey(url));
+  }
+
   async clear(): Promise<void> {
     const values = await this.storage.get(null);
     const keys = Object.keys(values).filter((key) =>

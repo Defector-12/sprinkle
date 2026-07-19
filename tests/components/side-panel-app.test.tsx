@@ -94,4 +94,23 @@ describe('SidePanelApp', () => {
     expect(screen.getByRole('button', { name: '框选页面区域' })).toBeVisible();
     expect(screen.queryByText('原文出处')).not.toBeInTheDocument();
   });
+
+  it('offers a retry action after page extraction fails', async () => {
+    const failedContext: PageContext = {
+      ...unactivatedContext,
+      status: 'failed',
+      warning: '页面没有可读取的正文',
+    };
+    const bridge = createBridge(failedContext);
+    render(<SidePanelApp bridge={bridge} />);
+
+    expect(
+      await screen.findByRole('heading', { name: '页面读取失败' }),
+    ).toBeVisible();
+    await userEvent.click(
+      screen.getByRole('button', { name: '重新读取页面' }),
+    );
+
+    expect(bridge.activatePage).toHaveBeenCalledOnce();
+  });
 });

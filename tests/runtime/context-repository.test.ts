@@ -83,6 +83,27 @@ describe('SessionContextRepository', () => {
     await expect(repository.listForTab(4)).resolves.toEqual([]);
     await expect(repository.listForTab(5)).resolves.toHaveLength(1);
   });
+
+  it('ignores malformed values and supports deleting a single page', async () => {
+    const storage = new MemoryStorage();
+    const repository = new SessionContextRepository(storage);
+    const context = createContext(4, 'https://example.com/article');
+    storage.values['context-reader:context:invalid'] = { tabId: 4 };
+    await repository.save(context);
+
+    expect(await repository.listForTab(4)).toEqual([context]);
+    await repository.deletePage(4, context.url);
+    await expect(repository.get(4, context.url)).resolves.toBeNull();
+  });
+
+  it('does not issue a remove call when a tab has no contexts', async () => {
+    const storage = new MemoryStorage();
+    const repository = new SessionContextRepository(storage);
+
+    await repository.deleteTab(99);
+
+    expect(storage.values).toEqual({});
+  });
 });
 
 describe('ConversationArchive', () => {
@@ -106,6 +127,21 @@ describe('ConversationArchive', () => {
 
     await archive.clear();
 
+    expect(storage.values).toEqual({});
+  });
+
+  it('returns an empty history for malformed archives and supports deletion', async () => {
+    const storage = new MemoryStorage();
+    const archive = new ConversationArchive(storage);
+    const url = 'https://example.com/article';
+    storage.values[`context-reader:conversation:${url}`] = {
+      normalizedUrl: url,
+    };
+
+    await expect(archive.load(url)).resolves.toEqual([]);
+    await archive.delete(url);
+    expect(storage.values).toEqual({});
+    await archive.clear();
     expect(storage.values).toEqual({});
   });
 });
