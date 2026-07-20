@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -130,5 +130,77 @@ describe('FloatingAssistant', () => {
     expect(
       await screen.findByText('这里指模型按输入选择部分专家网络参与计算。'),
     ).toBeVisible();
+  });
+
+  it('drags the floating button without triggering a click-open', async () => {
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+    await waitFor(() => expect(bridge.initialize).toHaveBeenCalledOnce());
+
+    const orb = screen.getByRole('button', { name: '打开 Context Reader' });
+    const pointer = (type: string, clientX: number, clientY: number) =>
+      act(() => {
+        orb.dispatchEvent(
+          new MouseEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            clientX,
+            clientY,
+          }),
+        );
+      });
+
+    pointer('pointerdown', 380, 760);
+    pointer('pointermove', 120, 300);
+    pointer('pointerup', 120, 300);
+    fireEvent.click(orb);
+
+    expect(
+      screen.queryByRole('dialog', { name: 'Context Reader 对话' }),
+    ).not.toBeInTheDocument();
+    const movedOrb = screen.getByRole('button', {
+      name: '打开 Context Reader',
+    });
+    expect(movedOrb).toBeVisible();
+    expect(movedOrb.className).toContain('cr-orb');
+    // dragged to the left half → snaps to the left edge, not the default right edge
+    expect(movedOrb.style.left).toBe('18px');
+  });
+
+  it('caps the dialog height so a long answer stays scrollable when opened mid-screen', async () => {
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+    await waitFor(() => expect(bridge.initialize).toHaveBeenCalledOnce());
+
+    const orb = screen.getByRole('button', { name: '打开 Context Reader' });
+    const pointer = (type: string, clientX: number, clientY: number) =>
+      act(() => {
+        orb.dispatchEvent(
+          new MouseEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            clientX,
+            clientY,
+          }),
+        );
+      });
+
+    // Drag the orb to the vertical middle of the viewport.
+    const midY = Math.round(window.innerHeight / 2);
+    pointer('pointerdown', 380, 760);
+    pointer('pointermove', 200, midY);
+    pointer('pointerup', 200, midY);
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('context-reader:open'));
+    });
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Context Reader 对话',
+    });
+    const maxHeight = Number.parseFloat(dialog.style.maxHeight);
+    expect(maxHeight).toBeGreaterThan(0);
+    // The card must fit within the viewport, never spilling off-screen.
+    expect(maxHeight).toBeLessThanOrEqual(window.innerHeight);
   });
 });
