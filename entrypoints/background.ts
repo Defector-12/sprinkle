@@ -33,6 +33,7 @@ const environment = import.meta.env;
 const modelClient = new OpenAiCompatibleModelClient({
   endpoint: environment.VITE_MODEL_API_URL?.trim() ?? '',
   model: environment.VITE_MODEL_ID?.trim() ?? '',
+  supportsVision: environment.VITE_MODEL_SUPPORTS_VISION === 'true',
 });
 const contexts = new SessionContextRepository(sessionStorageArea());
 const conversations = new ConversationArchive(localStorageArea());

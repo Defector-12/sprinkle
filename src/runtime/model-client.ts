@@ -3,6 +3,7 @@ import type { ModelRequest } from '../core/types.ts';
 export type ModelClientErrorCode =
   | 'MODEL_NOT_CONFIGURED'
   | 'API_KEY_MISSING'
+  | 'VISION_NOT_SUPPORTED'
   | 'PROVIDER_ERROR'
   | 'INVALID_RESPONSE'
   | 'NETWORK_ERROR';
@@ -21,6 +22,7 @@ export class ModelClientError extends Error {
 export interface ModelConfig {
   endpoint: string;
   model: string;
+  supportsVision?: boolean;
 }
 
 type Fetcher = (
@@ -52,10 +54,18 @@ function assistantText(response: ProviderResponse): string | null {
   return text || null;
 }
 
+function requestContainsImage(request: ModelRequest): boolean {
+  return request.messages.some(
+    (message) =>
+      Array.isArray(message.content) &&
+      message.content.some((part) => part.type === 'image_url'),
+  );
+}
+
 export class OpenAiCompatibleModelClient {
   constructor(
     private readonly config: ModelConfig,
-    private readonly fetcher: Fetcher = fetch,
+    private readonly fetcher: Fetcher = (input, init) => fetch(input, init),
   ) {}
 
   async complete(apiKey: string, request: ModelRequest): Promise<string> {
@@ -69,6 +79,12 @@ export class OpenAiCompatibleModelClient {
       throw new ModelClientError(
         'API_KEY_MISSING',
         '请先在设置中填写 API Key。',
+      );
+    }
+    if (this.config.supportsVision === false && requestContainsImage(request)) {
+      throw new ModelClientError(
+        'VISION_NOT_SUPPORTED',
+        `当前模型 ${this.config.model} 不支持图片输入。请改用支持视觉理解的模型后重新构建插件。`,
       );
     }
 
@@ -86,10 +102,11 @@ export class OpenAiCompatibleModelClient {
           stream: false,
         }),
       });
-    } catch {
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
       throw new ModelClientError(
         'NETWORK_ERROR',
-        '无法连接模型服务，请检查网络后重试。',
+        `无法连接模型服务，请检查网络后重试。（${detail}）`,
       );
     }
 
