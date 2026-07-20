@@ -1,18 +1,19 @@
 # Context Reader
 
-Context Reader 是一个 Chrome / Edge Manifest V3 浏览器插件。用户手动启用当前技术文章后，可以围绕全文、选中文字、文章图片或框选区域直接提问。不同标签页与页面的上下文彼此隔离，返回原页面时恢复。
+Context Reader 是一个 Chrome / Edge Manifest V3 浏览器插件。普通网页加载后，插件以靠边悬浮球的形式自动解析文章；用户可以围绕全文或选中文字就地提问。不同标签页与页面的上下文彼此隔离，返回原页面时恢复。
 
 ## 当前能力
 
-- 手动读取当前网页的标题、章节、段落、列表、代码块和图片信息
+- 自动读取当前网页的标题、章节、段落、列表和代码块
+- 默认只显示悬浮球，不改变网页布局
 - 选中文字后通过页面内快捷按钮发起提问
-- 选择文章图片或框选可见区域
+- 点击悬浮球或工具栏图标展开网页内对话卡片
 - 基于相关文章片段和连续对话构建模型请求
 - 不展示原文出处、引用卡片或定位入口
 - 按 `tabId + 规范化 URL` 隔离和恢复页面上下文
-- 标签页关闭后清除正文、图片和截图
+- 标签页关闭后清除正文和临时上下文
 - 可选地在本地保留问答文本
-- 单一视觉模型接口，用户自行提供 API Key
+- 单一文本模型接口，用户自行提供 API Key
 
 ## 技术栈
 
@@ -20,7 +21,7 @@ Context Reader 是一个 Chrome / Edge Manifest V3 浏览器插件。用户手�
 - React 19
 - TypeScript 7
 - Vitest 4
-- Manifest V3 Side Panel API
+- Manifest V3 Content Script + Shadow DOM
 
 ## 本地开发
 
@@ -35,7 +36,8 @@ pnpm dev
 
 ```bash
 VITE_MODEL_API_URL=https://provider.example/v1/chat/completions
-VITE_MODEL_ID=vision-model
+VITE_MODEL_ID=text-model
+VITE_MODEL_SUPPORTS_VISION=false
 ```
 
 这两个值会进入浏览器扩展包，只能用于公开的接口地址和模型标识。API Key 不得写入环境变量或源码，由用户在扩展设置页输入。
@@ -67,9 +69,9 @@ pnpm check
 
 ## 隐私边界
 
-- 页面未手动启用前，不提取正文或图片。
+- 页面加载后只在浏览器本地解析正文，不会因此自动调用模型 API。
 - API Key 只保存在 `browser.storage.local`。
-- 页面正文、图片和截图只进入 `browser.storage.session`。
+- 页面正文只进入 `browser.storage.session`。
 - 标签页关闭后，删除对应的临时页面上下文。
 - 开启“保留对话记录”后，只归档问答文本。
 
@@ -78,8 +80,8 @@ pnpm check
 ```text
 entrypoints/
   background.ts       后台上下文与模型编排
-  content.ts          页面解析、文字/图片/区域选择
-  sidepanel/          文章问答侧边栏
+  content.ts          页面解析、选词入口与悬浮助手挂载
+  sidepanel/          保留的开发回退界面，不再由工具栏打开
   options/            API Key 与隐私设置
 src/
   components/         React 界面
@@ -94,4 +96,4 @@ tests/                核心、运行时和组件测试
 - 正式使用前必须确定并配置具体模型 API。
 - 当前模型客户端采用 OpenAI-compatible Chat Completions 请求结构。
 - 不支持 PDF、视频、iframe 内容和跨文章联合问答。
-- 区域框选只覆盖当前可见视口。
+- 当前固定模型不支持图片输入，图片与区域框选入口暂不显示。

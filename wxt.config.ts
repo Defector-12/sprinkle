@@ -6,7 +6,7 @@ export default defineConfig({
     name: 'Context Reader',
     description: '在当前技术文章的上下文中提问。',
     version: '0.1.0',
-    permissions: ['activeTab', 'storage', 'tabs', 'sidePanel'],
+    permissions: ['activeTab', 'scripting', 'storage', 'tabs'],
     host_permissions: [
       'http://*/*',
       'https://*/*',

@@ -77,10 +77,29 @@ async function activeTab(): Promise<PageTab> {
   };
 }
 
+function senderTab(sender: Browser.runtime.MessageSender): PageTab | null {
+  const tab = sender.tab;
+  if (tab?.id == null || !isSupportedUrl(tab.url)) return null;
+  return {
+    id: tab.id,
+    url: tab.url,
+    title: tab.title || new URL(tab.url).hostname,
+    windowId: tab.windowId,
+  };
+}
+
+async function requestTab(
+  sender: Browser.runtime.MessageSender,
+): Promise<PageTab> {
+  return senderTab(sender) ?? activeTab();
+}
+
 async function notify(context: PageContext): Promise<void> {
-  await browser.runtime
-    .sendMessage({ type: 'context:changed', context })
-    .catch(() => undefined);
+  const event = { type: 'context:changed', context } as const;
+  await Promise.all([
+    browser.runtime.sendMessage(event).catch(() => undefined),
+    browser.tabs.sendMessage(context.tabId, event).catch(() => undefined),
+  ]);
 }
 
 async function getOrCreateContext(tab: {
@@ -141,8 +160,15 @@ async function activatePage(tab: PageTab): Promise<PageContext> {
   }
 }
 
-async function activateCurrentPage(): Promise<PageContext> {
-  return activatePage(await activeTab());
+async function initializePage(tab: PageTab): Promise<PageContext> {
+  const current = await getOrCreateContext(tab);
+  if (
+    current.article &&
+    (current.status === 'ready' || current.status === 'partial')
+  ) {
+    return current;
+  }
+  return activatePage(tab);
 }
 
 function message(
@@ -157,8 +183,10 @@ function message(
   };
 }
 
-async function askCurrentPage(question: string): Promise<PageContext> {
-  const tab = await activeTab();
+async function askPage(
+  question: string,
+  tab: PageTab,
+): Promise<PageContext> {
   const current = await getOrCreateContext(tab);
   if (!current.article || !['ready', 'partial'].includes(current.status)) {
     throw new Error('请先读取当前页面，再发送问题。');
@@ -217,15 +245,16 @@ async function askCurrentPage(question: string): Promise<PageContext> {
   }
 }
 
-async function clearCurrentPage(): Promise<PageContext> {
-  const tab = await activeTab();
+async function clearPage(tab: PageTab): Promise<PageContext> {
   await contexts.deletePage(tab.id, tab.url);
   await conversations.delete(tab.url);
   return getOrCreateContext(tab);
 }
 
-async function startPicker(type: ContentRequest['type']): Promise<void> {
-  const tab = await activeTab();
+async function startPicker(
+  type: ContentRequest['type'],
+  tab: PageTab,
+): Promise<void> {
   const context = await getOrCreateContext(tab);
   if (!['ready', 'partial'].includes(context.status)) {
     throw new Error('请先读取当前页面。');
@@ -252,9 +281,6 @@ async function setFocusFromPage(
   };
   await contexts.save(updated);
   await notify(updated);
-  await browser.sidePanel
-    .open({ tabId: sender.tab.id })
-    .catch(() => undefined);
   return updated;
 }
 
@@ -265,19 +291,23 @@ async function handleRequest(
   try {
     switch (request.type) {
       case 'context:get': {
-        return success(await getOrCreateContext(await activeTab()));
+        return success(await getOrCreateContext(await requestTab(sender)));
       }
+      case 'context:initialize':
+        return success(await initializePage(await requestTab(sender)));
       case 'context:activate':
-        return success(await activateCurrentPage());
+        return success(await activatePage(await requestTab(sender)));
       case 'context:clear':
-        return success(await clearCurrentPage());
+        return success(await clearPage(await requestTab(sender)));
       case 'chat:ask':
-        return success(await askCurrentPage(request.question));
+        return success(
+          await askPage(request.question, await requestTab(sender)),
+        );
       case 'picker:image:start':
-        await startPicker('picker:image:start');
+        await startPicker('picker:image:start', await requestTab(sender));
         return success(undefined);
       case 'picker:region:start':
-        await startPicker('picker:region:start');
+        await startPicker('picker:region:start', await requestTab(sender));
         return success(undefined);
       case 'focus:set':
         return success(await setFocusFromPage(request.focus, sender));
@@ -295,10 +325,25 @@ async function handleRequest(
   }
 }
 
+async function openAssistant(tab: Browser.tabs.Tab): Promise<void> {
+  if (tab.id == null || !isSupportedUrl(tab.url)) return;
+
+  const request = { type: 'assistant:open' } satisfies ContentRequest;
+  try {
+    await browser.tabs.sendMessage(tab.id, request);
+  } catch {
+    await browser.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['/content-scripts/content.js'],
+    });
+    await browser.tabs.sendMessage(tab.id, request);
+  }
+}
+
 export default defineBackground(() => {
-  void browser.sidePanel
-    .setPanelBehavior({ openPanelOnActionClick: true })
-    .catch(() => undefined);
+  browser.action.onClicked.addListener((tab) => {
+    void openAssistant(tab);
+  });
 
   browser.runtime.onMessage.addListener(
     (request: ExtensionRequest, sender) => handleRequest(request, sender),

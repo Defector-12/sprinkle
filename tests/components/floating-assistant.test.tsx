@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -86,7 +86,9 @@ describe('FloatingAssistant', () => {
     });
     render(<FloatingAssistant bridge={bridge} />);
 
-    window.dispatchEvent(new CustomEvent('context-reader:open'));
+    act(() => {
+      window.dispatchEvent(new CustomEvent('context-reader:open'));
+    });
 
     expect(
       await screen.findByRole('dialog', { name: 'Context Reader 对话' }),

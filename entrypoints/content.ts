@@ -1,13 +1,21 @@
+import { createElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import { browser } from 'wxt/browser';
 import { defineContentScript } from 'wxt/utils/define-content-script';
 
+import {
+  FLOATING_ASSISTANT_OPEN_EVENT,
+  FloatingAssistant,
+} from '../src/components/FloatingAssistant.tsx';
 import { extractArticle } from '../src/core/article-extractor.ts';
 import type { FocusContext } from '../src/core/types.ts';
+import { ContentAssistantBridge } from '../src/runtime/content-assistant-bridge.ts';
 import type {
   ContentRequest,
   ExtensionRequest,
   RuntimeResult,
 } from '../src/runtime/messages.ts';
+import floatingAssistantCss from '../src/styles/floating-assistant.css?inline';
 
 const UI_ATTRIBUTE = 'data-context-reader-ui';
 
@@ -70,7 +78,10 @@ function createSelectionButton(): HTMLButtonElement {
   return button;
 }
 
-function installTextSelection(): () => void {
+function installTextSelection(openAssistant: () => void): () => void {
+  document
+    .querySelector(`[${UI_ATTRIBUTE}="selection-button"]`)
+    ?.remove();
   const button = createSelectionButton();
   let selectedText = '';
   let selectedElement: Element | null = null;
@@ -119,7 +130,9 @@ function installTextSelection(): () => void {
       section: sectionFor(selectedElement),
     };
     hide();
-    await sendRuntime({ type: 'focus:set', focus }).catch(() => undefined);
+    await sendRuntime({ type: 'focus:set', focus })
+      .then(openAssistant)
+      .catch(() => undefined);
   };
 
   document.addEventListener('mouseup', onMouseUp);
@@ -131,6 +144,61 @@ function installTextSelection(): () => void {
     document.removeEventListener('scroll', hide, true);
     button.removeEventListener('click', onButtonClick);
     button.remove();
+  };
+}
+
+function openFloatingAssistant(): void {
+  window.dispatchEvent(new CustomEvent(FLOATING_ASSISTANT_OPEN_EVENT));
+}
+
+interface MountedAssistant {
+  host: HTMLElement;
+  root: Root;
+  removeEventIsolation: () => void;
+}
+
+function mountFloatingAssistant(): MountedAssistant {
+  document
+    .querySelector(`[${UI_ATTRIBUTE}="assistant-root"]`)
+    ?.remove();
+
+  const host = document.createElement('context-reader-assistant');
+  host.setAttribute(UI_ATTRIBUTE, 'assistant-root');
+  const shadow = host.attachShadow({ mode: 'open' });
+  const style = document.createElement('style');
+  style.textContent = floatingAssistantCss;
+  const container = document.createElement('div');
+  shadow.append(style, container);
+  document.documentElement.append(host);
+
+  const isolatedEvents = [
+    'click',
+    'pointerdown',
+    'pointerup',
+    'keydown',
+    'keyup',
+    'keypress',
+  ];
+  const stopPropagation = (event: Event) => event.stopPropagation();
+  for (const eventName of isolatedEvents) {
+    shadow.addEventListener(eventName, stopPropagation);
+  }
+
+  const root = createRoot(container);
+  root.render(
+    createElement(FloatingAssistant, {
+      bridge: new ContentAssistantBridge(),
+    }),
+  );
+
+  return {
+    host,
+    root,
+    removeEventIsolation: () => {
+      for (const eventName of isolatedEvents) {
+        shadow.removeEventListener(eventName, stopPropagation);
+      }
+    },
   };
 }
 
@@ -425,12 +493,13 @@ export default defineContentScript({
   matches: ['http://*/*', 'https://*/*'],
   runAt: 'document_idle',
   main() {
-    const uninstallTextSelection = installTextSelection();
-
     const onMessage = (request: ContentRequest) => {
       switch (request.type) {
         case 'page:extract':
           return Promise.resolve(extractArticle(document, location.href));
+        case 'assistant:open':
+          openFloatingAssistant();
+          return Promise.resolve({ ok: true });
         case 'picker:image:start':
           startImagePicker();
           return Promise.resolve({ ok: true });
@@ -441,11 +510,19 @@ export default defineContentScript({
     };
 
     browser.runtime.onMessage.addListener(onMessage);
+    const assistant = mountFloatingAssistant();
+    const uninstallTextSelection = installTextSelection(
+      openFloatingAssistant,
+    );
+
     window.addEventListener(
       'pagehide',
       () => {
         uninstallTextSelection();
         browser.runtime.onMessage.removeListener(onMessage);
+        assistant.removeEventIsolation();
+        assistant.root.unmount();
+        assistant.host.remove();
       },
       { once: true },
     );

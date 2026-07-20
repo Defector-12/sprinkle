@@ -4,47 +4,47 @@
 
 在不建设账号、计费和业务服务端的前提下，实现一个 Chrome / Edge Manifest V3 插件：
 
-- 用户按页面手动启用。
-- 页面正文、图片和对话上下文按标签页与 URL 隔离。
-- 文本、图片和区域截图可以组成多模态问题。
+- 网页内默认只显示低干扰悬浮球，并自动解析页面。
+- 页面正文和对话上下文按标签页与 URL 隔离。
+- 选中文字可以与文章相关片段组成文本问题。
 - API Key 不进入网页上下文。
-- 页面关闭后清理临时正文、图片和截图。
+- 页面关闭后清理临时正文。
 
 ## 2. 运行时结构
 
 ```text
 Browser Action
-  -> Side Panel (React)
-       -> runtime message
-          -> Background Service Worker
-               -> storage.session: PageContext
-               -> storage.local: Settings / optional messages
-               -> Model API
-               -> tabs.sendMessage
-                    -> Content Script
-                         -> article extraction
-                         -> text selection
-                         -> image selection
-                         -> region capture
+  -> tabs.sendMessage("assistant:open")
+       -> Content Script + Shadow DOM
+            -> Floating Assistant (React)
+            -> article extraction
+            -> text selection
+            -> runtime message
+                 -> Background Service Worker
+                      -> storage.session: PageContext
+                      -> storage.local: Settings / optional messages
+                      -> Model API
 ```
 
-### Side Panel
+### Floating Assistant
 
-- 展示当前页面状态和独立对话。
-- 触发读取、提问、图片选择、区域框选和清除操作。
+- 默认以 48px 悬浮球靠边显示，不改变网页布局。
+- 点击悬浮球、工具栏图标或选词“提问”后展开对话卡片。
+- 展示解析状态、已选文字、当前页面对话和错误反馈。
+- 通过 Shadow DOM 隔离网页样式，并阻止交互事件冒泡到宿主页面。
 - 不直接访问 API Key，也不直接请求模型。
 
 ### Content Script
 
 - 只运行在 HTTP / HTTPS 页面。
-- 接到读取命令后解析 DOM，不在页面未启用时预先提取正文。
-- 注入轻量文字快捷入口、图片选择状态和区域框选层。
+- 在 `document_idle` 阶段挂载悬浮助手并自动请求页面解析。
+- 注入轻量文字快捷入口。
 - 将选择结果发送给 Background，不持久化数据。
 
 ### Background Service Worker
 
 - 是页面上下文、模型请求和存储清理的唯一编排入口。
-- 从 Side Panel 获取当前活动标签页。
+- 优先根据消息发送者识别页面，避免标签切换时串用活动标签页。
 - 从 Content Script 获取页面结构与选择结果。
 - 从扩展本地存储读取 API Key，并直接请求模型。
 - 监听标签页关闭事件并清除对应临时上下文。
@@ -67,8 +67,7 @@ URL 规范化规则：
 ### 生命周期
 
 ```text
-UNACTIVATED
-  -> PARSING
+PARSING
   -> READY | PARTIAL | FAILED
 
 READY | PARTIAL
@@ -76,10 +75,9 @@ READY | PARTIAL
   -> READY | PARTIAL
 ```
 
-- 新 URL 自动创建 `UNACTIVATED` 容器。
+- 新 URL 自动创建上下文并进入 `PARSING`。
 - 返回同一标签页内的旧 URL 时恢复已有上下文。
-- 已启用页面刷新后自动重新解析，并保留消息。
-- 未启用页面刷新后仍保持未启用。
+- 已解析页面刷新后自动重新解析，并保留消息。
 - 标签页关闭后删除该标签页的全部 `PageContext`。
 
 ## 4. 页面解析
@@ -97,7 +95,6 @@ article -> main -> [role="main"] -> body
 - `pre`
 - `blockquote`
 - `ul` / `ol`
-- `img`、`alt`、`figcaption` 和相邻内容
 
 过滤内容：
 
@@ -156,7 +153,7 @@ VITE_MODEL_ID
 }
 ```
 
-接口支持文本消息和 `image_url` 多模态内容。模型未配置、API Key 缺失、网络错误、HTTP 错误和无效响应均转化为明确的产品错误。
+当前固定模型只支持文本消息，`VITE_MODEL_SUPPORTS_VISION=false` 时界面隐藏图片工具，运行时也会阻止图片请求。模型未配置、API Key 缺失、网络错误、HTTP 错误和无效响应均转化为明确的产品错误。
 
 ## 7. 存储
 
@@ -166,7 +163,6 @@ VITE_MODEL_ID
 
 - 页面状态
 - 解析后的正文块
-- 图片元信息
 - 当前选择内容
 - 当前页面消息
 
@@ -183,8 +179,6 @@ VITE_MODEL_ID
 不保存：
 
 - 文章全文
-- 图片
-- 区域截图
 - 模型请求完整上下文
 
 ## 8. 安全边界
@@ -192,13 +186,13 @@ VITE_MODEL_ID
 - Content Script 无权读取 API Key。
 - API Key 不进入 DOM、普通日志、模型消息和对话归档。
 - 模型请求只从 Background 发出。
-- 页面未启用前不执行正文提取。
+- 自动解析只发生在浏览器本地；用户发送问题后才调用模型 API。
 - 清除当前上下文时，同时删除该 URL 的本地对话归档。
 
 ## 9. 验证策略
 
 - Core：URL、解析、检索、上下文状态和模型请求单元测试。
 - Runtime：session/local 存储与模型错误边界测试。
-- UI：手动启用、发送问题、设置保存、无出处 UI 和失败重试组件测试。
+- UI：悬浮球默认态、自动解析、选词展开、发送问题、Esc 收起和设置保存组件测试。
 - Build：Chrome MV3 和 Edge MV3 双构建。
-- Manual：解压扩展加载、真实网页解析、选中文字、图片选择和区域截图。
+- Manual：解压扩展加载、真实网页自动解析、选中文字、工具栏打开与悬浮卡片问答。

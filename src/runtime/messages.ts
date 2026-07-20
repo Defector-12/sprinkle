@@ -6,6 +6,7 @@ import type {
 
 export type ExtensionRequest =
   | { type: 'context:get' }
+  | { type: 'context:initialize' }
   | { type: 'context:activate' }
   | { type: 'context:clear' }
   | { type: 'chat:ask'; question: string }
@@ -16,6 +17,7 @@ export type ExtensionRequest =
 
 export type ContentRequest =
   | { type: 'page:extract' }
+  | { type: 'assistant:open' }
   | { type: 'picker:image:start' }
   | { type: 'picker:region:start' };
 

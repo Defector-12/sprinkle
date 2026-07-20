@@ -1,0 +1,21 @@
+{
+  "scannedAt": "2026-07-20",
+  "framework": "WXT + React",
+  "register": "product",
+  "fontStack": "System UI with PingFang SC fallback",
+  "palette": "Existing OKLCH warm-neutral tokens with a restrained orange accent",
+  "motion": "CSS-only, state-driven, reduced-motion supported",
+  "spacing": "4px base scale",
+  "preserved": [
+    "OKLCH color language",
+    "1px borders",
+    "restrained accent usage",
+    "existing settings surface"
+  ],
+  "introduced": [
+    "Shadow DOM floating assistant",
+    "progressive orb-to-card interaction",
+    "automatic local article parsing",
+    "WCAG 2.2 AA keyboard behavior"
+  ]
+}
