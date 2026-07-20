@@ -11,6 +11,9 @@ if (!root) throw new Error('Side panel root element is missing');
 
 createRoot(root).render(
   <StrictMode>
-    <SidePanelApp bridge={new BrowserExtensionBridge()} />
+    <SidePanelApp
+      bridge={new BrowserExtensionBridge()}
+      supportsVision={import.meta.env.VITE_MODEL_SUPPORTS_VISION === 'true'}
+    />
   </StrictMode>,
 );

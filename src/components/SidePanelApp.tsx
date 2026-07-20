@@ -24,6 +24,7 @@ export interface ExtensionBridge {
 
 export interface SidePanelAppProps {
   bridge: ExtensionBridge;
+  supportsVision?: boolean;
 }
 
 function statusLabel(context: PageContext): string {
@@ -138,7 +139,10 @@ function MessageList({ context }: { context: PageContext }) {
   );
 }
 
-export function SidePanelApp({ bridge }: SidePanelAppProps) {
+export function SidePanelApp({
+  bridge,
+  supportsVision = true,
+}: SidePanelAppProps) {
   const [context, setContext] = useState<PageContext | null>(null);
   const [question, setQuestion] = useState('');
   const [busy, setBusy] = useState(false);
@@ -307,28 +311,30 @@ export function SidePanelApp({ bridge }: SidePanelAppProps) {
           )}
 
           <section className="composer-panel" aria-label="提问工具">
-            <div className="tool-row">
-              <button
-                className="tool-button"
-                type="button"
-                aria-label="选择文章图片"
-                onClick={() => void bridge.startImagePicker()}
-                disabled={!canAsk || busy}
-              >
-                <Image size={16} aria-hidden="true" />
-                图片
-              </button>
-              <button
-                className="tool-button"
-                type="button"
-                aria-label="框选页面区域"
-                onClick={() => void bridge.startRegionPicker()}
-                disabled={!canAsk || busy}
-              >
-                <Scan size={16} aria-hidden="true" />
-                框选
-              </button>
-            </div>
+            {supportsVision && (
+              <div className="tool-row">
+                <button
+                  className="tool-button"
+                  type="button"
+                  aria-label="选择文章图片"
+                  onClick={() => void bridge.startImagePicker()}
+                  disabled={!canAsk || busy}
+                >
+                  <Image size={16} aria-hidden="true" />
+                  图片
+                </button>
+                <button
+                  className="tool-button"
+                  type="button"
+                  aria-label="框选页面区域"
+                  onClick={() => void bridge.startRegionPicker()}
+                  disabled={!canAsk || busy}
+                >
+                  <Scan size={16} aria-hidden="true" />
+                  框选
+                </button>
+              </div>
+            )}
 
             <div className="composer">
               <label className="sr-only" htmlFor="question">
