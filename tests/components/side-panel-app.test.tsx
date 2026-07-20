@@ -75,7 +75,7 @@ describe('SidePanelApp', () => {
 
   it('supports text questions and image tools without source UI', async () => {
     const bridge = createBridge(readyContext);
-    render(<SidePanelApp bridge={bridge} />);
+    render(<SidePanelApp bridge={bridge} supportsVision />);
 
     const composer = await screen.findByRole('textbox', {
       name: '向当前文章提问',
@@ -93,6 +93,21 @@ describe('SidePanelApp', () => {
     ).toBeVisible();
     expect(screen.getByRole('button', { name: '框选页面区域' })).toBeVisible();
     expect(screen.queryByText('原文出处')).not.toBeInTheDocument();
+  });
+
+  it('hides image tools when the fixed model is text-only', async () => {
+    const bridge = createBridge(readyContext);
+    render(<SidePanelApp bridge={bridge} supportsVision={false} />);
+
+    expect(
+      await screen.findByRole('textbox', { name: '向当前文章提问' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: '选择文章图片' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '框选页面区域' }),
+    ).not.toBeInTheDocument();
   });
 
   it('offers a retry action after page extraction fails', async () => {
