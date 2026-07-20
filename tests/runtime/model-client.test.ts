@@ -15,6 +15,21 @@ const request: ModelRequest = {
   ],
 };
 
+const imageRequest: ModelRequest = {
+  messages: [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Explain this image.' },
+        {
+          type: 'image_url',
+          image_url: { url: 'https://example.com/diagram.png' },
+        },
+      ],
+    },
+  ],
+};
+
 describe('OpenAiCompatibleModelClient', () => {
   it('fails clearly while the implementation-side model config is empty', async () => {
     const client = new OpenAiCompatibleModelClient(
@@ -42,6 +57,26 @@ describe('OpenAiCompatibleModelClient', () => {
     await expect(client.complete('', request)).rejects.toEqual(
       expect.objectContaining({
         code: 'API_KEY_MISSING',
+      }),
+    );
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('rejects image requests before fetch when the fixed model is text-only', async () => {
+    const fetcher = vi.fn();
+    const client = new OpenAiCompatibleModelClient(
+      {
+        endpoint: 'https://api.deepseek.com/v1/chat/completions',
+        model: 'deepseek-v4-flash',
+        supportsVision: false,
+      },
+      fetcher,
+    );
+
+    await expect(client.complete('key', imageRequest)).rejects.toEqual(
+      expect.objectContaining({
+        code: 'VISION_NOT_SUPPORTED',
+        message: expect.stringContaining('不支持图片输入'),
       }),
     );
     expect(fetcher).not.toHaveBeenCalled();
