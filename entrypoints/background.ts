@@ -319,6 +319,9 @@ async function handleRequest(
           }),
         );
       }
+      case 'settings:open':
+        await browser.runtime.openOptionsPage();
+        return success(undefined);
     }
   } catch (cause) {
     return failure(cause);

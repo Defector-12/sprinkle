@@ -13,7 +13,8 @@ export type ExtensionRequest =
   | { type: 'picker:image:start' }
   | { type: 'picker:region:start' }
   | { type: 'focus:set'; focus: FocusContext }
-  | { type: 'capture:visible' };
+  | { type: 'capture:visible' }
+  | { type: 'settings:open' };
 
 export type ContentRequest =
   | { type: 'page:extract' }

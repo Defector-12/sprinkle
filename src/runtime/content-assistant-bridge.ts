@@ -27,7 +27,7 @@ export class ContentAssistantBridge implements FloatingAssistantBridge {
   }
 
   async openSettings(): Promise<void> {
-    await browser.runtime.openOptionsPage();
+    await send<void>({ type: 'settings:open' });
   }
 
   subscribe(listener: (context: PageContext) => void): () => void {
