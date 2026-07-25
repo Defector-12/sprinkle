@@ -34,6 +34,43 @@ const unactivatedContext: PageContext = {
   article: null,
 };
 
+const partialContext: PageContext = {
+  ...readyContext,
+  status: 'partial',
+  warning: '当前页面只读取到部分内容',
+  article: {
+    ...readyContext.article!,
+    blocks: [
+      {
+        id: 'block-1',
+        type: 'paragraph',
+        text: 'Short note.',
+        section: 'Short note',
+        order: 0,
+      },
+    ],
+    isPartial: true,
+    diagnostics: {
+      rootKind: 'body',
+      readableLength: 11,
+      minimumReadableLength: 80,
+      rootTextLength: 420,
+      candidateBlockCount: 3,
+      acceptedBlockCount: 1,
+      excludedBlockCount: 1,
+      emptyBlockCount: 1,
+      articleCandidateCount: 0,
+      mainCandidateCount: 0,
+      roleMainCandidateCount: 0,
+      iframeCount: 1,
+      canvasCount: 0,
+      tableCount: 1,
+      shadowRootCount: 0,
+      loadingIndicatorCount: 1,
+    },
+  },
+};
+
 function createBridge(
   context: PageContext = readyContext,
   overrides: Partial<FloatingAssistantBridge> = {},
@@ -228,6 +265,48 @@ describe('FloatingAssistant', () => {
         screen.queryByRole('button', { name: '打开 Context Reader' }),
       ).not.toBeInTheDocument(),
     );
+  });
+
+  it('opens partial-reading diagnostics without disrupting the chat view', async () => {
+    const bridge = createBridge(partialContext);
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    expect(
+      screen.getByRole('textbox', { name: '向当前文章提问' }),
+    ).toBeVisible();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '查看读取诊断' }),
+    );
+
+    expect(
+      screen.getByRole('heading', { name: '读取诊断' }),
+    ).toBeVisible();
+    expect(screen.getByText('11 字 / 80 字')).toBeVisible();
+    expect(
+      screen.queryByRole('textbox', { name: '向当前文章提问' }),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /可读文字不足/ }),
+    );
+
+    expect(
+      screen.getByRole('heading', { name: '可读文字不足' }),
+    ).toBeVisible();
+    expect(screen.getByText(/当前只提取到 11 个字符/)).toBeVisible();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '返回诊断概览' }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: '返回对话' }));
+
+    expect(
+      screen.getByRole('textbox', { name: '向当前文章提问' }),
+    ).toBeVisible();
   });
 
   it('drags the floating button without triggering a click-open', async () => {

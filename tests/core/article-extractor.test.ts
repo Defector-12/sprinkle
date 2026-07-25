@@ -53,6 +53,43 @@ describe('extractArticle', () => {
 
     expect(article.isPartial).toBe(true);
     expect(article.blocks).toHaveLength(1);
+    expect(article.diagnostics).toEqual(
+      expect.objectContaining({
+        rootKind: 'main',
+        readableLength: 11,
+        minimumReadableLength: 80,
+        candidateBlockCount: 1,
+        acceptedBlockCount: 1,
+      }),
+    );
+  });
+
+  it('records structural evidence that can explain incomplete extraction', () => {
+    document.body.innerHTML = `
+      <article>
+        <p>Brief preview.</p>
+        <table><tr><td>Important tabular content</td></tr></table>
+        <iframe src="/embedded-document"></iframe>
+        <p aria-hidden="true">Hidden article body</p>
+        <div class="skeleton">Loading more content</div>
+      </article>
+      <article>
+        <p>${'Long article body '.repeat(20)}</p>
+      </article>
+    `;
+
+    const article = extractArticle(document, 'https://example.com/dynamic');
+
+    expect(article.diagnostics).toEqual(
+      expect.objectContaining({
+        rootKind: 'article',
+        articleCandidateCount: 2,
+        excludedBlockCount: 1,
+        tableCount: 1,
+        iframeCount: 1,
+        loadingIndicatorCount: 1,
+      }),
+    );
   });
 
   it('uses document metadata fallbacks and handles lists, quotes, and lazy images', () => {
