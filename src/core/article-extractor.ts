@@ -1,9 +1,13 @@
 import type {
   ArticleBlock,
   ArticleBlockType,
+  ArticleDiagnostics,
   ArticleDocument,
   ArticleImage,
+  ArticleRootKind,
 } from './types.ts';
+
+export const MINIMUM_READABLE_LENGTH = 80;
 
 const CONTENT_SELECTOR = [
   'h1',
@@ -41,13 +45,17 @@ function blockTypeFor(element: Element): ArticleBlockType {
   return 'paragraph';
 }
 
-function findArticleRoot(source: Document): Element {
-  return (
-    source.querySelector('article') ??
-    source.querySelector('main') ??
-    source.querySelector('[role="main"]') ??
-    source.body
-  );
+function findArticleRoot(source: Document): {
+  element: Element;
+  kind: ArticleRootKind;
+} {
+  const article = source.querySelector('article');
+  if (article) return { element: article, kind: 'article' };
+  const main = source.querySelector('main');
+  if (main) return { element: main, kind: 'main' };
+  const roleMain = source.querySelector('[role="main"]');
+  if (roleMain) return { element: roleMain, kind: 'role-main' };
+  return { element: source.body, kind: 'body' };
 }
 
 function findSection(root: Element, target: Element, fallback: string): string {
@@ -93,7 +101,8 @@ export function extractArticle(
   source: Document,
   pageUrl: string,
 ): ArticleDocument {
-  const root = findArticleRoot(source);
+  const rootSelection = findArticleRoot(source);
+  const root = rootSelection.element;
   const firstHeading = root.querySelector('h1');
   const title =
     cleanText(firstHeading?.textContent) ||
@@ -102,12 +111,21 @@ export function extractArticle(
 
   let currentSection = title;
   const blocks: ArticleBlock[] = [];
+  const candidateBlocks = root.querySelectorAll(CONTENT_SELECTOR);
+  let excludedBlockCount = 0;
+  let emptyBlockCount = 0;
 
-  for (const element of root.querySelectorAll(CONTENT_SELECTOR)) {
-    if (element.closest(EXCLUDED_ANCESTORS)) continue;
+  for (const element of candidateBlocks) {
+    if (element.closest(EXCLUDED_ANCESTORS)) {
+      excludedBlockCount += 1;
+      continue;
+    }
 
     const text = cleanText(element.textContent);
-    if (!text) continue;
+    if (!text) {
+      emptyBlockCount += 1;
+      continue;
+    }
 
     const type = blockTypeFor(element);
     if (type === 'heading') currentSection = text;
@@ -151,12 +169,35 @@ export function extractArticle(
     (total, block) => total + block.text.length,
     0,
   );
+  const diagnostics: ArticleDiagnostics = {
+    rootKind: rootSelection.kind,
+    readableLength,
+    minimumReadableLength: MINIMUM_READABLE_LENGTH,
+    rootTextLength: cleanText(root.textContent).length,
+    candidateBlockCount: candidateBlocks.length,
+    acceptedBlockCount: blocks.length,
+    excludedBlockCount,
+    emptyBlockCount,
+    articleCandidateCount: source.querySelectorAll('article').length,
+    mainCandidateCount: source.querySelectorAll('main').length,
+    roleMainCandidateCount: source.querySelectorAll('[role="main"]').length,
+    iframeCount: root.querySelectorAll('iframe').length,
+    canvasCount: root.querySelectorAll('canvas').length,
+    tableCount: root.querySelectorAll('table').length,
+    shadowRootCount: [...root.querySelectorAll('*')].filter(
+      (element) => element.shadowRoot,
+    ).length,
+    loadingIndicatorCount: root.querySelectorAll(
+      '[aria-busy="true"], [data-loading], .loading, .skeleton',
+    ).length,
+  };
 
   return {
     title,
     url: pageUrl,
     blocks,
     images,
-    isPartial: readableLength < 80,
+    isPartial: readableLength < MINIMUM_READABLE_LENGTH,
+    diagnostics,
   };
 }

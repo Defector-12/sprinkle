@@ -407,6 +407,203 @@ textarea:disabled {
   animation: cr-progress 1.4s var(--cr-ease-out) infinite;
 }
 
+.cr-diagnostics {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--cr-space-3);
+  scrollbar-color: var(--cr-color-border) transparent;
+  scrollbar-width: thin;
+}
+
+.cr-page-back {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--cr-radius-round);
+  background: transparent;
+  color: var(--cr-color-ink-muted);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.cr-page-back:hover {
+  background: var(--cr-color-surface-muted);
+  color: var(--cr-color-ink);
+}
+
+.cr-diagnostics__heading {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--cr-space-2);
+  padding: var(--cr-space-3) var(--cr-space-1);
+}
+
+.cr-diagnostics__heading > svg {
+  margin-top: 2px;
+  color: var(--cr-color-accent);
+}
+
+.cr-diagnostics__heading h2,
+.cr-diagnostics__heading p {
+  margin: 0;
+}
+
+.cr-diagnostics__heading h2 {
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.cr-diagnostics__heading p {
+  margin-top: 2px;
+  color: var(--cr-color-ink-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.cr-diagnostics__metrics {
+  display: grid;
+  margin: 0;
+  border-block: 1px solid var(--cr-color-border);
+}
+
+.cr-diagnostics__metrics > div {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cr-space-3);
+  border-bottom: 1px solid var(--cr-color-border);
+  padding: 7px var(--cr-space-1);
+}
+
+.cr-diagnostics__metrics > div:last-child {
+  border-bottom: 0;
+}
+
+.cr-diagnostics__metrics dt {
+  color: var(--cr-color-ink-muted);
+  font-size: 11px;
+}
+
+.cr-diagnostics__metrics dd {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.cr-diagnostics__issues {
+  display: grid;
+  gap: 2px;
+  padding-block: var(--cr-space-3);
+}
+
+.cr-diagnostics__issues h3,
+.cr-diagnostics__detail h3 {
+  margin: 0;
+  padding: 0 var(--cr-space-1) var(--cr-space-1);
+  color: var(--cr-color-ink-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cr-diagnostics__issues > button {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cr-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--cr-radius-sm);
+  background: transparent;
+  padding: 8px var(--cr-space-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.cr-diagnostics__issues > button:hover {
+  border-color: var(--cr-color-border);
+  background: var(--cr-color-surface-muted);
+}
+
+.cr-diagnostics__issues > button > span {
+  display: grid;
+  min-width: 0;
+}
+
+.cr-diagnostics__issues strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cr-diagnostics__issues small {
+  overflow: hidden;
+  color: var(--cr-color-ink-muted);
+  font-size: 10px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cr-diagnostics__issues > button > svg {
+  flex: 0 0 auto;
+  color: var(--cr-color-ink-muted);
+}
+
+.cr-diagnostics__detail {
+  display: grid;
+  gap: var(--cr-space-2);
+  border-top: 1px solid var(--cr-color-border);
+  padding: var(--cr-space-3) var(--cr-space-1);
+}
+
+.cr-diagnostics__detail p,
+.cr-diagnostics__detail ol {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.cr-diagnostics__detail ol {
+  display: grid;
+  gap: 6px;
+  padding-left: 20px;
+}
+
+.cr-diagnostics__retry {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: auto;
+  border: 1px solid var(--cr-color-border);
+  border-radius: var(--cr-radius-round);
+  background: var(--cr-color-surface);
+  color: var(--cr-color-ink);
+  padding: 7px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cr-diagnostics__retry:hover {
+  border-color: var(--cr-color-ink-muted);
+  background: var(--cr-color-surface-muted);
+}
+
 .cr-messages {
   display: grid;
   flex: 1 1 auto;

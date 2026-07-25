@@ -19,6 +19,7 @@ import {
 } from 'react';
 
 import type { PageContext } from '../core/types.ts';
+import { ArticleDiagnosticsPanel } from './ArticleDiagnosticsPanel.tsx';
 
 export const FLOATING_ASSISTANT_OPEN_EVENT = 'context-reader:open';
 export const FLOATING_ASSISTANT_ACTIVE_EVENT = 'context-reader:active';
@@ -289,6 +290,7 @@ interface StatusPanelProps {
   context: PageContext | null;
   hasApiKey: boolean | null;
   onOpenSettings: () => void;
+  onOpenDiagnostics: () => void;
   onRetry: () => void;
 }
 
@@ -296,6 +298,7 @@ function StatusPanel({
   context,
   hasApiKey,
   onOpenSettings,
+  onOpenDiagnostics,
   onRetry,
 }: StatusPanelProps) {
   const blockCount = context?.article?.blocks.length ?? 0;
@@ -348,6 +351,11 @@ function StatusPanel({
           <button type="button" onClick={onOpenSettings}>
             填写 API Key
           </button>
+          {context.status === 'partial' && (
+            <button type="button" onClick={onOpenDiagnostics}>
+              查看读取诊断
+            </button>
+          )}
         </div>
       </div>
     );
@@ -373,6 +381,11 @@ function StatusPanel({
           {context.status === 'partial' ? '部分内容已理解' : '页面内容已理解'}
         </strong>
         <p>已读取 {blockCount} 个内容块，可以开始提问。</p>
+        {context.status === 'partial' && (
+          <button type="button" onClick={onOpenDiagnostics}>
+            查看读取诊断
+          </button>
+        )}
       </div>
     </div>
   );
@@ -383,6 +396,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [isVisible, setIsVisible] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [question, setQuestion] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -473,6 +487,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       setContext(nextContext);
       setIsOpen(false);
       setIsVisible(false);
+      setShowDiagnostics(false);
       setDialogSize(null);
       setDialogPosition(null);
       setQuestion('');
@@ -511,7 +526,10 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       else void refreshApiKeyStatus();
     };
     const closeWithEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsOpen(false);
+      if (event.key === 'Escape') {
+        setShowDiagnostics(false);
+        setIsOpen(false);
+      }
     };
     const refreshAfterSettings = () => void refreshApiKeyStatus();
 
@@ -932,28 +950,43 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             className="cr-icon-button"
             type="button"
             aria-label="收起 Context Reader"
-            onClick={() => setIsOpen(false)}
+            onClick={() => {
+              setShowDiagnostics(false);
+              setIsOpen(false);
+            }}
           >
             <X size={18} aria-hidden="true" />
           </button>
         </div>
       </header>
 
-      {context?.focus?.type === 'text' && (
-        <aside className="cr-focus" aria-label="已引用的选中文字">
-          <span>已引用</span>
-          <p>{context.focus.text}</p>
-        </aside>
-      )}
+      {showDiagnostics && context?.article ? (
+        <ArticleDiagnosticsPanel
+          article={context.article}
+          onBack={() => setShowDiagnostics(false)}
+          onRetry={() => {
+            setShowDiagnostics(false);
+            void activatePage();
+          }}
+        />
+      ) : (
+        <>
+          {context?.focus?.type === 'text' && (
+            <aside className="cr-focus" aria-label="已引用的选中文字">
+              <span>已引用</span>
+              <p>{context.focus.text}</p>
+            </aside>
+          )}
 
-      <StatusPanel
-        context={context}
-        hasApiKey={hasApiKey}
-        onOpenSettings={() => void bridge.openSettings()}
-        onRetry={() => void activatePage()}
-      />
+          <StatusPanel
+            context={context}
+            hasApiKey={hasApiKey}
+            onOpenSettings={() => void bridge.openSettings()}
+            onOpenDiagnostics={() => setShowDiagnostics(true)}
+            onRetry={() => void activatePage()}
+          />
 
-      {context?.messages.length ? (
+          {context?.messages.length ? (
         <ol className="cr-messages" aria-label="当前页面对话">
           {context.messages.map((message) => {
             const isStreaming =
@@ -980,13 +1013,13 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           })}
           <li ref={messagesEndRef} className="cr-messages__end" aria-hidden="true" />
         </ol>
-      ) : context?.status === 'parsing' ? (
+          ) : context?.status === 'parsing' ? (
         <div className="cr-understanding" aria-hidden="true">
           <span />
           <span />
           <span />
         </div>
-      ) : (
+          ) : (
         <div className="cr-empty">
           <p>{hasApiKey === false ? '配置后即可提问' : '从当前页面开始提问'}</p>
           <span>
@@ -995,9 +1028,9 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
               : '回答会结合已理解的页面内容。'}
           </span>
         </div>
-      )}
+          )}
 
-      <div className="cr-feedback" aria-live="polite" aria-atomic="true">
+          <div className="cr-feedback" aria-live="polite" aria-atomic="true">
         {error && (
           <p className="cr-error" role="alert">
             {error}
@@ -1006,9 +1039,9 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
         {!error && context?.warning && context.status !== 'failed' && (
           <p className="cr-warning">{context.warning}</p>
         )}
-      </div>
+          </div>
 
-      <div className="cr-composer">
+          <div className="cr-composer">
         <label className="cr-sr-only" htmlFor="context-reader-question">
           向当前文章提问
         </label>
@@ -1047,7 +1080,9 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             <Send size={16} aria-hidden="true" />
           )}
         </button>
-      </div>
+          </div>
+        </>
+      )}
 
       <div
         className={`cr-resize-handle cr-resize-handle--${resizeCorner}`}

@@ -30,12 +30,34 @@ export interface ArticleImage {
   surroundingText: string;
 }
 
+export type ArticleRootKind = 'article' | 'main' | 'role-main' | 'body';
+
+export interface ArticleDiagnostics {
+  rootKind: ArticleRootKind;
+  readableLength: number;
+  minimumReadableLength: number;
+  rootTextLength: number;
+  candidateBlockCount: number;
+  acceptedBlockCount: number;
+  excludedBlockCount: number;
+  emptyBlockCount: number;
+  articleCandidateCount: number;
+  mainCandidateCount: number;
+  roleMainCandidateCount: number;
+  iframeCount: number;
+  canvasCount: number;
+  tableCount: number;
+  shadowRootCount: number;
+  loadingIndicatorCount: number;
+}
+
 export interface ArticleDocument {
   title: string;
   url: string;
   blocks: ArticleBlock[];
   images: ArticleImage[];
   isPartial: boolean;
+  diagnostics?: ArticleDiagnostics;
 }
 
 export interface ArticleChunk {
