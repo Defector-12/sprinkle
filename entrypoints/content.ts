@@ -4,6 +4,7 @@ import { browser } from 'wxt/browser';
 import { defineContentScript } from 'wxt/utils/define-content-script';
 
 import {
+  FLOATING_ASSISTANT_ACTIVE_EVENT,
   FLOATING_ASSISTANT_OPEN_EVENT,
   FloatingAssistant,
 } from '../src/components/FloatingAssistant.tsx';
@@ -85,12 +86,17 @@ function installTextSelection(openAssistant: () => void): () => void {
   const button = createSelectionButton();
   let selectedText = '';
   let selectedElement: Element | null = null;
+  let enabled = false;
 
   const hide = () => {
     button.style.display = 'none';
   };
 
   const showForSelection = () => {
+    if (!enabled) {
+      hide();
+      return;
+    }
     const selection = window.getSelection();
     const text = cleanText(selection?.toString());
     if (!selection || selection.isCollapsed || text.length < 2) {
@@ -124,6 +130,7 @@ function installTextSelection(openAssistant: () => void): () => void {
   };
 
   const onButtonClick = async () => {
+    if (!enabled) return;
     const focus: FocusContext = {
       type: 'text',
       text: selectedText,
@@ -134,21 +141,31 @@ function installTextSelection(openAssistant: () => void): () => void {
       .then(openAssistant)
       .catch(() => undefined);
   };
+  const onActiveChange = (event: Event) => {
+    enabled = Boolean((event as CustomEvent<boolean>).detail);
+    if (!enabled) hide();
+  };
 
   document.addEventListener('mouseup', onMouseUp);
   document.addEventListener('scroll', hide, true);
+  window.addEventListener(FLOATING_ASSISTANT_ACTIVE_EVENT, onActiveChange);
   button.addEventListener('click', onButtonClick);
 
   return () => {
     document.removeEventListener('mouseup', onMouseUp);
     document.removeEventListener('scroll', hide, true);
+    window.removeEventListener(FLOATING_ASSISTANT_ACTIVE_EVENT, onActiveChange);
     button.removeEventListener('click', onButtonClick);
     button.remove();
   };
 }
 
-function openFloatingAssistant(): void {
-  window.dispatchEvent(new CustomEvent(FLOATING_ASSISTANT_OPEN_EVENT));
+function openFloatingAssistant(activate = false): void {
+  window.dispatchEvent(
+    new CustomEvent(FLOATING_ASSISTANT_OPEN_EVENT, {
+      detail: { activate },
+    }),
+  );
 }
 
 interface MountedAssistant {
@@ -174,7 +191,9 @@ function mountFloatingAssistant(): MountedAssistant {
   const isolatedEvents = [
     'click',
     'pointerdown',
+    'pointermove',
     'pointerup',
+    'pointercancel',
     'keydown',
     'keyup',
     'keypress',
@@ -498,7 +517,7 @@ export default defineContentScript({
         case 'page:extract':
           return Promise.resolve(extractArticle(document, location.href));
         case 'assistant:open':
-          openFloatingAssistant();
+          window.setTimeout(() => openFloatingAssistant(true), 0);
           return Promise.resolve({ ok: true });
         case 'picker:image:start':
           startImagePicker();
@@ -512,7 +531,7 @@ export default defineContentScript({
     browser.runtime.onMessage.addListener(onMessage);
     const assistant = mountFloatingAssistant();
     const uninstallTextSelection = installTextSelection(
-      openFloatingAssistant,
+      () => openFloatingAssistant(false),
     );
 
     window.addEventListener(

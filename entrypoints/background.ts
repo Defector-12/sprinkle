@@ -160,17 +160,6 @@ async function activatePage(tab: PageTab): Promise<PageContext> {
   }
 }
 
-async function initializePage(tab: PageTab): Promise<PageContext> {
-  const current = await getOrCreateContext(tab);
-  if (
-    current.article &&
-    (current.status === 'ready' || current.status === 'partial')
-  ) {
-    return current;
-  }
-  return activatePage(tab);
-}
-
 function message(
   role: ChatMessage['role'],
   content: string,
@@ -248,7 +237,9 @@ async function askPage(
 async function clearPage(tab: PageTab): Promise<PageContext> {
   await contexts.deletePage(tab.id, tab.url);
   await conversations.delete(tab.url);
-  return getOrCreateContext(tab);
+  const cleared = await getOrCreateContext(tab);
+  await notify(cleared);
+  return cleared;
 }
 
 async function startPicker(
@@ -293,8 +284,6 @@ async function handleRequest(
       case 'context:get': {
         return success(await getOrCreateContext(await requestTab(sender)));
       }
-      case 'context:initialize':
-        return success(await initializePage(await requestTab(sender)));
       case 'context:activate':
         return success(await activatePage(await requestTab(sender)));
       case 'context:clear':
@@ -322,6 +311,8 @@ async function handleRequest(
       case 'settings:open':
         await browser.runtime.openOptionsPage();
         return success(undefined);
+      case 'settings:has-key':
+        return success(Boolean((await loadSettings()).apiKey.trim()));
     }
   } catch (cause) {
     return failure(cause);
@@ -367,18 +358,4 @@ export default defineBackground(() => {
     })();
   });
 
-  browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.status !== 'complete' || !isSupportedUrl(tab.url)) return;
-    const url = tab.url;
-    void (async () => {
-      const existing = await contexts.get(tabId, url);
-      if (!existing || existing.status === 'unactivated') return;
-      await activatePage({
-        id: tabId,
-        url,
-        title: tab.title || new URL(url).hostname,
-        windowId: tab.windowId,
-      }).catch(() => undefined);
-    })();
-  });
 });

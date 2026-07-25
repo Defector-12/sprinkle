@@ -6,7 +6,6 @@ import type {
 
 export type ExtensionRequest =
   | { type: 'context:get' }
-  | { type: 'context:initialize' }
   | { type: 'context:activate' }
   | { type: 'context:clear' }
   | { type: 'chat:ask'; question: string }
@@ -14,6 +13,7 @@ export type ExtensionRequest =
   | { type: 'picker:region:start' }
   | { type: 'focus:set'; focus: FocusContext }
   | { type: 'capture:visible' }
+  | { type: 'settings:has-key' }
   | { type: 'settings:open' };
 
 export type ContentRequest =

@@ -19,7 +19,19 @@ async function send<T>(message: ExtensionRequest): Promise<T> {
 
 export class ContentAssistantBridge implements FloatingAssistantBridge {
   initialize(): Promise<PageContext> {
-    return send<PageContext>({ type: 'context:initialize' });
+    return send<PageContext>({ type: 'context:get' });
+  }
+
+  activate(): Promise<PageContext> {
+    return send<PageContext>({ type: 'context:activate' });
+  }
+
+  deactivate(): Promise<PageContext> {
+    return send<PageContext>({ type: 'context:clear' });
+  }
+
+  hasApiKey(): Promise<boolean> {
+    return send<boolean>({ type: 'settings:has-key' });
   }
 
   ask(question: string): Promise<PageContext> {

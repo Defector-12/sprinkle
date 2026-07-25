@@ -4,7 +4,7 @@
 
 在不建设账号、计费和业务服务端的前提下，实现一个 Chrome / Edge Manifest V3 插件：
 
-- 网页内默认只显示低干扰悬浮球，并自动解析页面。
+- 网页默认保持休眠；只有用户点击工具栏图标后才解析页面并显示悬浮助手。
 - 页面正文和对话上下文按标签页与 URL 隔离。
 - 选中文字可以与文章相关片段组成文本问题。
 - API Key 不进入网页上下文。
@@ -17,6 +17,7 @@ Browser Action
   -> tabs.sendMessage("assistant:open")
        -> Content Script + Shadow DOM
             -> Floating Assistant (React)
+            -> runtime message("context:activate")
             -> article extraction
             -> text selection
             -> runtime message
@@ -28,17 +29,19 @@ Browser Action
 
 ### Floating Assistant
 
-- 默认以 48px 悬浮球靠边显示，不改变网页布局。
-- 点击悬浮球、工具栏图标或选词“提问”后展开对话卡片。
-- 展示解析状态、已选文字、当前页面对话和错误反馈。
+- 未启用页面渲染为空，不读取页面内容。
+- 工具栏点击后展开卡片并显式进入页面理解流程；收起后以 48px 悬浮球靠边显示。
+- 展示未配置 API Key、理解中、已就绪、回答中和失败状态。
+- 悬浮球可拖动；对话卡片可通过可见角点拖动或键盘调整大小。
+- 基于 `visualViewport` 约束悬浮球和卡片，浏览器缩放后自动回收到可见区域。
 - 通过 Shadow DOM 隔离网页样式，并阻止交互事件冒泡到宿主页面。
 - 不直接访问 API Key，也不直接请求模型。
 
 ### Content Script
 
 - 只运行在 HTTP / HTTPS 页面。
-- 在 `document_idle` 阶段挂载悬浮助手并自动请求页面解析。
-- 注入轻量文字快捷入口。
+- 在 `document_idle` 阶段挂载休眠的悬浮助手，但不请求页面解析。
+- 只有已启用页面才开放轻量文字快捷入口。
 - 将选择结果发送给 Background，不持久化数据。
 
 ### Background Service Worker
@@ -67,17 +70,23 @@ URL 规范化规则：
 ### 生命周期
 
 ```text
+UNACTIVATED
+  --browser action--> PARSING
+
 PARSING
   -> READY | PARTIAL | FAILED
 
 READY | PARTIAL
   -> ANSWERING
   -> READY | PARTIAL
+
+ANY ACTIVE STATE
+  --stop understanding--> UNACTIVATED
 ```
 
-- 新 URL 自动创建上下文并进入 `PARSING`。
+- 新 URL 只创建 `UNACTIVATED` 上下文，不读取 DOM。
 - 返回同一标签页内的旧 URL 时恢复已有上下文。
-- 已解析页面刷新后自动重新解析，并保留消息。
+- 页面刷新不会自动重新解析；再次点击工具栏图标才刷新页面理解结果。
 - 标签页关闭后删除该标签页的全部 `PageContext`。
 
 ## 4. 页面解析
@@ -186,13 +195,14 @@ VITE_MODEL_ID
 - Content Script 无权读取 API Key。
 - API Key 不进入 DOM、普通日志、模型消息和对话归档。
 - 模型请求只从 Background 发出。
-- 自动解析只发生在浏览器本地；用户发送问题后才调用模型 API。
+- 页面理解只由用户点击工具栏图标触发，并且只发生在浏览器本地。
+- 用户发送问题后才调用模型 API；Content Script 只能获得“是否已配置 Key”的布尔状态。
 - 清除当前上下文时，同时删除该 URL 的本地对话归档。
 
 ## 9. 验证策略
 
 - Core：URL、解析、检索、上下文状态和模型请求单元测试。
 - Runtime：session/local 存储与模型错误边界测试。
-- UI：悬浮球默认态、自动解析、选词展开、发送问题、Esc 收起和设置保存组件测试。
+- UI：休眠默认态、显式启用、状态面板、选词展开、窗口缩放、浏览器缩放回收、发送问题、Esc 收起和设置保存组件测试。
 - Build：Chrome MV3 和 Edge MV3 双构建。
-- Manual：解压扩展加载、真实网页自动解析、选中文字、工具栏打开与悬浮卡片问答。
+- Manual：解压扩展加载、休眠页面不读取、工具栏显式启动、状态切换、选中文字、窗口缩放与悬浮卡片问答。

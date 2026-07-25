@@ -80,7 +80,7 @@ describe('FloatingAssistant', () => {
     render(<FloatingAssistant bridge={bridge} />);
 
     await userEvent.click(
-      screen.getByRole('button', { name: '打开 Context Reader' }),
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
     );
     expect(
       screen.getByRole('dialog', { name: 'Context Reader 对话' }),
@@ -107,7 +107,11 @@ describe('FloatingAssistant', () => {
     render(<FloatingAssistant bridge={bridge} />);
 
     act(() => {
-      window.dispatchEvent(new CustomEvent('context-reader:open'));
+      window.dispatchEvent(
+        new CustomEvent('context-reader:open', {
+          detail: { activate: false },
+        }),
+      );
     });
 
     expect(
@@ -140,7 +144,7 @@ describe('FloatingAssistant', () => {
     render(<FloatingAssistant bridge={bridge} />);
 
     await userEvent.click(
-      screen.getByRole('button', { name: '打开 Context Reader' }),
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
     );
     const input = screen.getByRole('textbox', { name: '向当前文章提问' });
     await userEvent.type(input, '这里的 MoE 是什么意思？');

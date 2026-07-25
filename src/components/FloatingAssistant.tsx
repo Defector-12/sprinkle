@@ -1,7 +1,10 @@
 import {
   Check,
+  KeyRound,
   LoaderCircle,
   MessageCircle,
+  Power,
+  RefreshCw,
   Send,
   Settings,
   X,
@@ -11,15 +14,24 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 
 import type { PageContext } from '../core/types.ts';
 
 export const FLOATING_ASSISTANT_OPEN_EVENT = 'context-reader:open';
+export const FLOATING_ASSISTANT_ACTIVE_EVENT = 'context-reader:active';
+
+export interface FloatingAssistantOpenDetail {
+  activate?: boolean;
+}
 
 export interface FloatingAssistantBridge {
   initialize(): Promise<PageContext>;
+  activate(): Promise<PageContext>;
+  deactivate(): Promise<PageContext>;
+  hasApiKey(): Promise<boolean>;
   ask(question: string): Promise<PageContext>;
   openSettings(): Promise<void>;
   subscribe(listener: (context: PageContext) => void): () => void;
@@ -31,6 +43,13 @@ export interface FloatingAssistantProps {
 
 const ORB_SIZE = 48;
 const EDGE_MARGIN = 18;
+const DIALOG_MARGIN = 12;
+const DIALOG_GAP = 12;
+const DIALOG_DEFAULT_WIDTH = 400;
+const DIALOG_MIN_WIDTH = 300;
+const DIALOG_MIN_HEIGHT = 260;
+const DIALOG_MAX_WIDTH = 720;
+const DIALOG_MAX_HEIGHT = 640;
 const DRAG_THRESHOLD = 4;
 const STREAM_INTERVAL_MS = 18;
 const STREAM_STEP = 2;
@@ -40,59 +59,149 @@ interface OrbPosition {
   y: number;
 }
 
-function viewport(): { width: number; height: number } {
-  if (typeof window === 'undefined') return { width: 400, height: 800 };
-  return { width: window.innerWidth, height: window.innerHeight };
+interface DialogSize {
+  width: number;
+  height: number;
+}
+
+interface ViewportBounds {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  right: number;
+  bottom: number;
+}
+
+interface DialogLayout {
+  style: CSSProperties;
+  opensBelow: boolean;
+  growsLeft: boolean;
+  maxWidth: number;
+  maxHeight: number;
+}
+
+function finiteOr(value: number | undefined, fallback: number): number {
+  return Number.isFinite(value) ? (value as number) : fallback;
+}
+
+function viewport(): ViewportBounds {
+  if (typeof window === 'undefined') {
+    return {
+      left: 0,
+      top: 0,
+      width: 400,
+      height: 800,
+      right: 400,
+      bottom: 800,
+    };
+  }
+
+  const visual = window.visualViewport;
+  const left = finiteOr(visual?.offsetLeft, 0);
+  const top = finiteOr(visual?.offsetTop, 0);
+  const width = Math.max(1, finiteOr(visual?.width, window.innerWidth));
+  const height = Math.max(1, finiteOr(visual?.height, window.innerHeight));
+  return {
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 function clampOrb({ x, y }: OrbPosition): OrbPosition {
-  const { width, height } = viewport();
-  const maxX = Math.max(EDGE_MARGIN, width - ORB_SIZE - EDGE_MARGIN);
-  const maxY = Math.max(EDGE_MARGIN, height - ORB_SIZE - EDGE_MARGIN);
-  const safeX = Number.isFinite(x) ? x : maxX;
-  const safeY = Number.isFinite(y) ? y : maxY;
+  const bounds = viewport();
+  const minX = bounds.left + EDGE_MARGIN;
+  const minY = bounds.top + EDGE_MARGIN;
+  const maxX = Math.max(minX, bounds.right - ORB_SIZE - EDGE_MARGIN);
+  const maxY = Math.max(minY, bounds.bottom - ORB_SIZE - EDGE_MARGIN);
   return {
-    x: Math.min(Math.max(EDGE_MARGIN, safeX), maxX),
-    y: Math.min(Math.max(EDGE_MARGIN, safeY), maxY),
+    x: clamp(Number.isFinite(x) ? x : maxX, minX, maxX),
+    y: clamp(Number.isFinite(y) ? y : maxY, minY, maxY),
   };
 }
 
 function defaultOrbPosition(): OrbPosition {
-  const { width, height } = viewport();
-  return clampOrb({ x: width, y: height });
+  const bounds = viewport();
+  return clampOrb({ x: bounds.right, y: bounds.bottom });
 }
 
 function snapToEdge({ x, y }: OrbPosition): OrbPosition {
-  const { width } = viewport();
+  const bounds = viewport();
   const center = x + ORB_SIZE / 2;
   const edgeX =
-    center < width / 2 ? EDGE_MARGIN : width - ORB_SIZE - EDGE_MARGIN;
+    center < bounds.left + bounds.width / 2
+      ? bounds.left + EDGE_MARGIN
+      : bounds.right - ORB_SIZE - EDGE_MARGIN;
   return clampOrb({ x: edgeX, y });
 }
 
-function dialogStyle({ x, y }: OrbPosition): CSSProperties {
-  const { width, height } = viewport();
-  const margin = 12;
-  const gap = 12;
-  const dialogWidth = Math.min(400, width - margin * 2);
-  const left = Math.min(
-    Math.max(margin, x + ORB_SIZE / 2 - dialogWidth / 2),
-    Math.max(margin, width - dialogWidth - margin),
+function dialogLayout(
+  { x, y }: OrbPosition,
+  requestedSize: DialogSize | null,
+): DialogLayout {
+  const bounds = viewport();
+  const orbCenterX = x + ORB_SIZE / 2;
+  const growsLeft = orbCenterX >= bounds.left + bounds.width / 2;
+  const anchorLeft = Math.max(bounds.left + DIALOG_MARGIN, x);
+  const anchorRight = Math.min(bounds.right - DIALOG_MARGIN, x + ORB_SIZE);
+  const availableWidth = growsLeft
+    ? anchorRight - (bounds.left + DIALOG_MARGIN)
+    : bounds.right - DIALOG_MARGIN - anchorLeft;
+  const viewportWidth = Math.max(160, bounds.width - DIALOG_MARGIN * 2);
+  const maxWidth = Math.min(
+    DIALOG_MAX_WIDTH,
+    viewportWidth,
+    Math.max(160, availableWidth),
+  );
+  const minWidth = Math.min(DIALOG_MIN_WIDTH, maxWidth);
+  const width = clamp(
+    requestedSize?.width ?? Math.min(DIALOG_DEFAULT_WIDTH, maxWidth),
+    minWidth,
+    maxWidth,
   );
 
-  // Anchor to whichever side of the orb has more room, and cap the height to
-  // the space actually available there so the card never spills off-screen.
-  const spaceBelow = height - (y + ORB_SIZE) - gap - margin;
-  const spaceAbove = y - gap - margin;
+  const spaceBelow =
+    bounds.bottom - DIALOG_MARGIN - (y + ORB_SIZE + DIALOG_GAP);
+  const spaceAbove = y - DIALOG_GAP - (bounds.top + DIALOG_MARGIN);
   const opensBelow = spaceBelow >= spaceAbove;
   const maxHeight = Math.min(
-    640,
-    Math.max(200, opensBelow ? spaceBelow : spaceAbove),
+    DIALOG_MAX_HEIGHT,
+    Math.max(120, opensBelow ? spaceBelow : spaceAbove),
   );
+  const minHeight = Math.min(DIALOG_MIN_HEIGHT, maxHeight);
+  const height = requestedSize
+    ? clamp(requestedSize.height, minHeight, maxHeight)
+    : undefined;
 
-  return opensBelow
-    ? { left, top: y + ORB_SIZE + gap, maxHeight }
-    : { left, bottom: height - y + gap, maxHeight };
+  const horizontalStyle: CSSProperties = growsLeft
+    ? { right: Math.max(0, window.innerWidth - anchorRight) }
+    : { left: anchorLeft };
+  const verticalStyle: CSSProperties = opensBelow
+    ? { top: y + ORB_SIZE + DIALOG_GAP }
+    : { bottom: Math.max(0, window.innerHeight - (y - DIALOG_GAP)) };
+
+  return {
+    opensBelow,
+    growsLeft,
+    maxWidth,
+    maxHeight,
+    style: {
+      ...horizontalStyle,
+      ...verticalStyle,
+      width,
+      height,
+      maxWidth,
+      maxHeight,
+    },
+  };
 }
 
 function prefersReducedMotion(): boolean {
@@ -105,23 +214,120 @@ function prefersReducedMotion(): boolean {
 
 function statusLabel(context: PageContext | null): string {
   switch (context?.status) {
+    case 'unactivated':
+      return '尚未启用';
     case 'parsing':
-      return '正在读取文章';
+      return '正在理解页面';
     case 'answering':
       return '正在生成回答';
     case 'partial':
-      return '部分内容可用';
+      return '部分内容已理解';
     case 'ready':
-      return '文章已就绪';
+      return '页面内容已理解';
     case 'failed':
-      return '页面读取失败';
+      return '页面理解失败';
     default:
-      return '正在连接页面';
+      return '正在启动';
   }
+}
+
+interface StatusPanelProps {
+  context: PageContext | null;
+  hasApiKey: boolean | null;
+  onOpenSettings: () => void;
+  onRetry: () => void;
+}
+
+function StatusPanel({
+  context,
+  hasApiKey,
+  onOpenSettings,
+  onRetry,
+}: StatusPanelProps) {
+  const blockCount = context?.article?.blocks.length ?? 0;
+
+  if (!context || context.status === 'parsing') {
+    return (
+      <div className="cr-state cr-state--loading" role="status" aria-live="polite">
+        <LoaderCircle className="cr-spin" size={18} aria-hidden="true" />
+        <div>
+          <strong>正在理解页面内容</strong>
+          <p>正在提取标题、段落和代码块</p>
+          <div
+            className="cr-progress"
+            role="progressbar"
+            aria-label="页面理解进度"
+            aria-valuetext="正在分析"
+          >
+            <span />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (context.status === 'failed') {
+    return (
+      <div className="cr-state cr-state--error" role="status" aria-live="polite">
+        <RefreshCw size={18} aria-hidden="true" />
+        <div>
+          <strong>页面理解失败</strong>
+          <p>{context.warning || '当前页面暂时无法读取。'}</p>
+          <button type="button" onClick={onRetry}>
+            重新理解页面
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (
+    (context.status === 'ready' || context.status === 'partial') &&
+    hasApiKey === false
+  ) {
+    return (
+      <div className="cr-state cr-state--warning" role="status" aria-live="polite">
+        <KeyRound size={18} aria-hidden="true" />
+        <div>
+          <strong>尚未配置 API Key</strong>
+          <p>页面已经理解，填写 API Key 后即可提问。</p>
+          <button type="button" onClick={onOpenSettings}>
+            填写 API Key
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (context.status === 'answering') {
+    return (
+      <div className="cr-state cr-state--loading" role="status" aria-live="polite">
+        <LoaderCircle className="cr-spin" size={18} aria-hidden="true" />
+        <div>
+          <strong>正在生成回答</strong>
+          <p>页面上下文已经准备好，请稍候。</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="cr-state cr-state--ready" role="status" aria-live="polite">
+      <Check size={18} aria-hidden="true" />
+      <div>
+        <strong>
+          {context.status === 'partial' ? '部分内容已理解' : '页面内容已理解'}
+        </strong>
+        <p>已读取 {blockCount} 个内容块，可以开始提问。</p>
+      </div>
+    </div>
+  );
 }
 
 export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   const [context, setContext] = useState<PageContext | null>(null);
+  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+  const [isVisible, setIsVisible] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [question, setQuestion] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -129,12 +335,16 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   const [orbPos, setOrbPos] = useState<OrbPosition>(() =>
     defaultOrbPosition(),
   );
+  const [dialogSize, setDialogSize] = useState<DialogSize | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
   const [revealed, setRevealed] = useState<{ id: string; count: number } | null>(
     null,
   );
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
   const messagesEndRef = useRef<HTMLLIElement>(null);
+  const explicitActivationRef = useRef(false);
   const dragState = useRef<{
     pointerId: number;
     offsetX: number;
@@ -143,14 +353,77 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     startY: number;
     moved: boolean;
   } | null>(null);
+  const resizeState = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startWidth: number;
+    startHeight: number;
+    growsLeft: boolean;
+    growsUp: boolean;
+    maxWidth: number;
+    maxHeight: number;
+  } | null>(null);
   const draggedRef = useRef(false);
+  const layout = dialogLayout(orbPos, dialogSize);
+
+  async function refreshApiKeyStatus() {
+    try {
+      setHasApiKey(await bridge.hasApiKey());
+    } catch {
+      setHasApiKey(false);
+    }
+  }
+
+  async function activatePage() {
+    explicitActivationRef.current = true;
+    setIsVisible(true);
+    setIsOpen(true);
+    setError(null);
+    setContext((current) =>
+      current
+        ? {
+            ...current,
+            status: 'parsing',
+            warning: null,
+          }
+        : current,
+    );
+    void refreshApiKeyStatus();
+
+    try {
+      setContext(await bridge.activate());
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : '页面理解失败，请稍后重试。',
+      );
+    }
+  }
+
+  async function deactivatePage() {
+    setError(null);
+    try {
+      const nextContext = await bridge.deactivate();
+      setContext(nextContext);
+      setIsOpen(false);
+      setIsVisible(false);
+      setDialogSize(null);
+      setQuestion('');
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : '停止理解失败，请稍后重试。',
+      );
+    }
+  }
 
   useEffect(() => {
     let active = true;
-    void bridge
-      .initialize()
-      .then((nextContext) => {
-        if (active) setContext(nextContext);
+    void Promise.all([bridge.initialize(), bridge.hasApiKey()])
+      .then(([nextContext, nextHasApiKey]) => {
+        if (!active || explicitActivationRef.current) return;
+        setContext(nextContext);
+        setHasApiKey(nextHasApiKey);
+        setIsVisible(nextContext.status !== 'unactivated');
       })
       .catch((cause: unknown) => {
         if (active) {
@@ -159,28 +432,54 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       });
 
     const unsubscribe = bridge.subscribe((nextContext) => {
-      if (active) setContext(nextContext);
+      if (!active) return;
+      setContext(nextContext);
+      setIsVisible(nextContext.status !== 'unactivated');
     });
-    const openFromPage = () => setIsOpen(true);
+    const openFromPage = (event: Event) => {
+      const detail = (event as CustomEvent<FloatingAssistantOpenDetail>).detail;
+      setIsVisible(true);
+      setIsOpen(true);
+      if (detail?.activate !== false) void activatePage();
+      else void refreshApiKeyStatus();
+    };
     const closeWithEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setIsOpen(false);
     };
+    const refreshAfterSettings = () => void refreshApiKeyStatus();
 
     window.addEventListener(FLOATING_ASSISTANT_OPEN_EVENT, openFromPage);
     window.addEventListener('keydown', closeWithEscape);
+    window.addEventListener('focus', refreshAfterSettings);
 
     return () => {
       active = false;
       unsubscribe();
       window.removeEventListener(FLOATING_ASSISTANT_OPEN_EVENT, openFromPage);
       window.removeEventListener('keydown', closeWithEscape);
+      window.removeEventListener('focus', refreshAfterSettings);
     };
   }, [bridge]);
 
   useEffect(() => {
-    const onResize = () => setOrbPos((pos) => clampOrb(pos));
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    const enabled =
+      isVisible && Boolean(context && context.status !== 'unactivated');
+    window.dispatchEvent(
+      new CustomEvent(FLOATING_ASSISTANT_ACTIVE_EVENT, { detail: enabled }),
+    );
+  }, [context, isVisible]);
+
+  useEffect(() => {
+    const keepInView = () => setOrbPos((position) => clampOrb(position));
+    const visual = window.visualViewport;
+    window.addEventListener('resize', keepInView);
+    visual?.addEventListener('resize', keepInView);
+    visual?.addEventListener('scroll', keepInView);
+    return () => {
+      window.removeEventListener('resize', keepInView);
+      visual?.removeEventListener('resize', keepInView);
+      visual?.removeEventListener('scroll', keepInView);
+    };
   }, []);
 
   useEffect(() => {
@@ -270,7 +569,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     }
     if (state.moved) {
       draggedRef.current = true;
-      setOrbPos((pos) => snapToEdge(pos));
+      setOrbPos((position) => snapToEdge(position));
     }
     setIsDragging(false);
   }
@@ -283,12 +582,93 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     setIsOpen(true);
   }
 
+  function onResizePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    const rect = dialogRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    resizeState.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startWidth: rect.width,
+      startHeight: rect.height,
+      growsLeft: layout.growsLeft,
+      growsUp: !layout.opensBelow,
+      maxWidth: layout.maxWidth,
+      maxHeight: layout.maxHeight,
+    };
+    setIsResizing(true);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  }
+
+  function onResizePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const state = resizeState.current;
+    if (!state || state.pointerId !== event.pointerId) return;
+    const widthDelta = event.clientX - state.startX;
+    const heightDelta = event.clientY - state.startY;
+    const minWidth = Math.min(DIALOG_MIN_WIDTH, state.maxWidth);
+    const minHeight = Math.min(DIALOG_MIN_HEIGHT, state.maxHeight);
+    setDialogSize({
+      width: clamp(
+        state.startWidth + (state.growsLeft ? -widthDelta : widthDelta),
+        minWidth,
+        state.maxWidth,
+      ),
+      height: clamp(
+        state.startHeight + (state.growsUp ? -heightDelta : heightDelta),
+        minHeight,
+        state.maxHeight,
+      ),
+    });
+  }
+
+  function endResize(event: ReactPointerEvent<HTMLDivElement>) {
+    const state = resizeState.current;
+    if (!state || state.pointerId !== event.pointerId) return;
+    resizeState.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    }
+    setIsResizing(false);
+  }
+
+  function resizeWithKeyboard(
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ): void {
+    const rect = dialogRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const step = event.shiftKey ? 32 : 16;
+    let width = dialogSize?.width ?? rect.width;
+    let height = dialogSize?.height ?? rect.height;
+    if (event.key === 'ArrowRight') width += step;
+    else if (event.key === 'ArrowLeft') width -= step;
+    else if (event.key === 'ArrowDown') height += step;
+    else if (event.key === 'ArrowUp') height -= step;
+    else return;
+    event.preventDefault();
+    setDialogSize({
+      width: clamp(
+        width,
+        Math.min(DIALOG_MIN_WIDTH, layout.maxWidth),
+        layout.maxWidth,
+      ),
+      height: clamp(
+        height,
+        Math.min(DIALOG_MIN_HEIGHT, layout.maxHeight),
+        layout.maxHeight,
+      ),
+    });
+  }
+
   const isBusy =
     context?.status === 'parsing' ||
     context?.status === 'answering' ||
     isSending;
   const canAsk =
-    context?.status === 'ready' || context?.status === 'partial';
+    hasApiKey === true &&
+    (context?.status === 'ready' || context?.status === 'partial');
+
+  if (!isVisible) return null;
 
   if (!isOpen) {
     return (
@@ -317,13 +697,18 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     );
   }
 
+  const resizeCorner = `${layout.opensBelow ? 'bottom' : 'top'}-${
+    layout.growsLeft ? 'left' : 'right'
+  }`;
+
   return (
     <section
+      ref={dialogRef}
       id="context-reader-dialog"
-      className="cr-dialog"
+      className={`cr-dialog${isResizing ? ' cr-dialog--resizing' : ''}`}
       role="dialog"
       aria-label="Context Reader 对话"
-      style={dialogStyle(orbPos)}
+      style={layout.style}
     >
       <header className="cr-header">
         <div className="cr-header__identity">
@@ -332,12 +717,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           </span>
           <div className="cr-header__copy">
             <strong>Context Reader</strong>
-            <span>
-              {context?.status === 'ready' && (
-                <Check size={11} aria-hidden="true" />
-              )}
-              {statusLabel(context)}
-            </span>
+            <span>{statusLabel(context)}</span>
           </div>
         </div>
         <div className="cr-header__actions">
@@ -348,6 +728,14 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             onClick={() => void bridge.openSettings()}
           >
             <Settings size={17} aria-hidden="true" />
+          </button>
+          <button
+            className="cr-icon-button"
+            type="button"
+            aria-label="停止理解当前页面"
+            onClick={() => void deactivatePage()}
+          >
+            <Power size={17} aria-hidden="true" />
           </button>
           <button
             className="cr-icon-button"
@@ -366,6 +754,13 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           <p>{context.focus.text}</p>
         </aside>
       )}
+
+      <StatusPanel
+        context={context}
+        hasApiKey={hasApiKey}
+        onOpenSettings={() => void bridge.openSettings()}
+        onRetry={() => void activatePage()}
+      />
 
       {context?.messages.length ? (
         <ol className="cr-messages" aria-label="当前页面对话">
@@ -394,10 +789,20 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           })}
           <li ref={messagesEndRef} className="cr-messages__end" aria-hidden="true" />
         </ol>
+      ) : context?.status === 'parsing' ? (
+        <div className="cr-understanding" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
       ) : (
         <div className="cr-empty">
-          <p>问一个与当前文章有关的问题</p>
-          <span>回答会结合已解析的文章内容。</span>
+          <p>{hasApiKey === false ? '配置后即可提问' : '从当前页面开始提问'}</p>
+          <span>
+            {hasApiKey === false
+              ? 'API Key 只保存在这个浏览器中。'
+              : '回答会结合已理解的页面内容。'}
+          </span>
         </div>
       )}
 
@@ -407,7 +812,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             {error}
           </p>
         )}
-        {!error && context?.warning && (
+        {!error && context?.warning && context.status !== 'failed' && (
           <p className="cr-warning">{context.warning}</p>
         )}
       </div>
@@ -421,7 +826,9 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           ref={inputRef}
           rows={2}
           value={question}
-          placeholder={canAsk ? '输入问题…' : statusLabel(context)}
+          placeholder={
+            hasApiKey === false ? '请先填写 API Key' : canAsk ? '输入问题…' : statusLabel(context)
+          }
           disabled={!canAsk || isSending}
           onChange={(event) => setQuestion(event.target.value)}
           onKeyDown={(event) => {
@@ -450,6 +857,19 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           )}
         </button>
       </div>
+
+      <div
+        className={`cr-resize-handle cr-resize-handle--${resizeCorner}`}
+        role="separator"
+        aria-label="调整对话框大小"
+        aria-description="拖动调整大小，或使用方向键调整宽高"
+        tabIndex={0}
+        onPointerDown={onResizePointerDown}
+        onPointerMove={onResizePointerMove}
+        onPointerUp={endResize}
+        onPointerCancel={endResize}
+        onKeyDown={resizeWithKeyboard}
+      />
     </section>
   );
 }
