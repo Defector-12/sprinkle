@@ -67,6 +67,8 @@ const partialContext: PageContext = {
       tableCount: 1,
       shadowRootCount: 0,
       loadingIndicatorCount: 1,
+      fallbackUsed: false,
+      fallbackBlockCount: 0,
     },
   },
 };

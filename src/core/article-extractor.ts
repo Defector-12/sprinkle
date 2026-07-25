@@ -28,9 +28,20 @@ const EXCLUDED_ANCESTORS = [
   'footer',
   'aside',
   'form',
+  'button',
   '[role="navigation"]',
+  '[role="toolbar"]',
+  '[role="group"]',
   '[aria-hidden="true"]',
 ].join(',');
+
+const CUSTOM_CONTENT_ROOT_SELECTOR = [
+  '[data-testid="longformContent"]',
+  '[data-testid="articleText"]',
+  '[data-testid="tweetText"]',
+].join(',');
+
+const CUSTOM_TEXT_ELEMENT_SELECTOR = 'div, span';
 
 function cleanText(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, ' ').trim();
@@ -43,6 +54,71 @@ function blockTypeFor(element: Element): ArticleBlockType {
   if (tagName === 'blockquote') return 'quote';
   if (tagName === 'ul' || tagName === 'ol') return 'list';
   return 'paragraph';
+}
+
+function hasDirectReadableText(element: Element): boolean {
+  return [...element.childNodes].some(
+    (node) =>
+      node.nodeType === Node.TEXT_NODE && cleanText(node.textContent).length > 0,
+  );
+}
+
+function hasReadableTextDescendant(element: Element): boolean {
+  return [...element.querySelectorAll(CUSTOM_TEXT_ELEMENT_SELECTOR)].some(
+    (descendant) =>
+      descendant !== element &&
+      !descendant.closest(EXCLUDED_ANCESTORS) &&
+      hasDirectReadableText(descendant),
+  );
+}
+
+function customTextElements(root: Element): Element[] {
+  const preferredRoots = [...root.querySelectorAll(CUSTOM_CONTENT_ROOT_SELECTOR)];
+  const searchRoots = preferredRoots.length ? preferredRoots : [root];
+  const elements: Element[] = [];
+
+  for (const searchRoot of searchRoots) {
+    const candidates = [
+      ...(searchRoot.matches(CUSTOM_TEXT_ELEMENT_SELECTOR)
+        ? [searchRoot]
+        : []),
+      ...searchRoot.querySelectorAll(CUSTOM_TEXT_ELEMENT_SELECTOR),
+    ];
+    for (const candidate of candidates) {
+      if (candidate.closest(EXCLUDED_ANCESTORS)) continue;
+      const text = cleanText(candidate.textContent);
+      if (!text) continue;
+      if (
+        !hasDirectReadableText(candidate) &&
+        hasReadableTextDescendant(candidate)
+      ) {
+        continue;
+      }
+      elements.push(candidate);
+    }
+  }
+
+  return elements;
+}
+
+function fallbackBlocks(root: Element, section: string): ArticleBlock[] {
+  const seen = new Set<string>();
+  const blocks: ArticleBlock[] = [];
+
+  for (const element of customTextElements(root)) {
+    const text = cleanText(element.textContent);
+    if (text.length < 2 || seen.has(text)) continue;
+    seen.add(text);
+    blocks.push({
+      id: `block-${blocks.length + 1}`,
+      type: 'paragraph',
+      text,
+      section,
+      order: blocks.length,
+    });
+  }
+
+  return blocks;
 }
 
 function findArticleRoot(source: Document): {
@@ -165,10 +241,27 @@ export function extractArticle(
     });
   }
 
-  const readableLength = blocks.reduce(
+  let readableLength = blocks.reduce(
     (total, block) => total + block.text.length,
     0,
   );
+  let fallbackUsed = false;
+  let fallbackBlockCount = 0;
+
+  if (readableLength < MINIMUM_READABLE_LENGTH) {
+    const recoveredBlocks = fallbackBlocks(root, title);
+    const recoveredLength = recoveredBlocks.reduce(
+      (total, block) => total + block.text.length,
+      0,
+    );
+    if (recoveredLength > readableLength) {
+      blocks.splice(0, blocks.length, ...recoveredBlocks);
+      readableLength = recoveredLength;
+      fallbackUsed = true;
+      fallbackBlockCount = recoveredBlocks.length;
+    }
+  }
+
   const diagnostics: ArticleDiagnostics = {
     rootKind: rootSelection.kind,
     readableLength,
@@ -190,6 +283,8 @@ export function extractArticle(
     loadingIndicatorCount: root.querySelectorAll(
       '[aria-busy="true"], [data-loading], .loading, .skeleton',
     ).length,
+    fallbackUsed,
+    fallbackBlockCount,
   };
 
   return {

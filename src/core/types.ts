@@ -49,6 +49,8 @@ export interface ArticleDiagnostics {
   tableCount: number;
   shadowRootCount: number;
   loadingIndicatorCount: number;
+  fallbackUsed: boolean;
+  fallbackBlockCount: number;
 }
 
 export interface ArticleDocument {

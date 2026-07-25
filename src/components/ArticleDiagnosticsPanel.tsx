@@ -48,6 +48,8 @@ function fallbackDiagnostics(article: ArticleDocument): ArticleDiagnostics {
     tableCount: 0,
     shadowRootCount: 0,
     loadingIndicatorCount: 0,
+    fallbackUsed: false,
+    fallbackBlockCount: 0,
   };
 }
 
@@ -162,6 +164,7 @@ export function buildDiagnosticIssues(
     diagnostics.rootTextLength - diagnostics.readableLength,
   );
   if (
+    !diagnostics.fallbackUsed &&
     uncapturedText >= 120 &&
     uncapturedText > diagnostics.readableLength * 1.5
   ) {
@@ -257,6 +260,12 @@ export function ArticleDiagnosticsPanel({
             {diagnostics.candidateBlockCount}
           </dd>
         </div>
+        {diagnostics.fallbackUsed && (
+          <div>
+            <dt>回退提取</dt>
+            <dd>已恢复 {diagnostics.fallbackBlockCount} 个文本块</dd>
+          </div>
+        )}
       </dl>
 
       <div className="cr-diagnostics__issues">

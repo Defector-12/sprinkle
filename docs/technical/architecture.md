@@ -105,6 +105,13 @@ article -> main -> [role="main"] -> body
 - `blockquote`
 - `ul` / `ol`
 
+当上述语义节点不足 80 个字符时，执行安全回退：
+
+- 优先读取 `data-testid="longformContent"`、`articleText`、`tweetText` 等明确正文容器，支持 X Article/长帖。
+- 其他 React 页面选择带直接文本、且没有更细文本子块的 `div/span` 叶子容器。
+- 排除按钮、toolbar、group、导航、表单和隐藏区域。
+- 按文本去重，避免多层 React 包装重复收录整篇正文。
+
 过滤内容：
 
 - `nav`
