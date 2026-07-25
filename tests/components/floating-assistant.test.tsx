@@ -326,6 +326,8 @@ describe('FloatingAssistant', () => {
     const handle = screen.getByRole('separator', {
       name: '调整对话框大小',
     });
+    expect(handle).toHaveClass('cr-resize-handle--bottom-left');
+    expect(handle).toHaveAttribute('title', '拖动调整整个对话框大小');
     const pointer = (type: string, clientX: number, clientY: number) =>
       act(() => {
         handle.dispatchEvent(
@@ -338,12 +340,58 @@ describe('FloatingAssistant', () => {
         );
       });
 
-    pointer('pointerdown', 612, 180);
-    pointer('pointermove', 512, 80);
-    pointer('pointerup', 512, 80);
+    pointer('pointerdown', 612, 580);
+    pointer('pointermove', 512, 680);
+    pointer('pointerup', 512, 680);
 
     expect(dialog.style.width).toBe('500px');
     expect(dialog.style.height).toBe('500px');
+  });
+
+  it('moves the expanded dialog independently by dragging its title area', async () => {
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    const dialog = screen.getByRole('dialog', {
+      name: 'Context Reader 对话',
+    });
+    vi.spyOn(dialog, 'getBoundingClientRect').mockReturnValue({
+      x: 612,
+      y: 180,
+      width: 400,
+      height: 400,
+      top: 180,
+      right: 1012,
+      bottom: 580,
+      left: 612,
+      toJSON: () => undefined,
+    });
+    const dragArea = screen.getByRole('button', {
+      name: '移动对话框',
+    });
+    const pointer = (type: string, clientX: number, clientY: number) =>
+      act(() => {
+        dragArea.dispatchEvent(
+          new MouseEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            clientX,
+            clientY,
+          }),
+        );
+      });
+
+    pointer('pointerdown', 700, 200);
+    pointer('pointermove', 500, 300);
+    pointer('pointerup', 500, 300);
+
+    expect(dialog.style.left).toBe('412px');
+    expect(dialog.style.top).toBe('280px');
+    expect(dialog.style.right).toBe('');
+    expect(dialog.style.bottom).toBe('');
   });
 
   it('keeps the orb inside the visual viewport after browser zoom changes', async () => {
