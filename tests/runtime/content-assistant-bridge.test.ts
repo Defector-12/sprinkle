@@ -35,6 +35,33 @@ describe('ContentAssistantBridge', () => {
     expect(openOptionsPage).not.toHaveBeenCalled();
   });
 
+  it('loads dormant context without starting page extraction', async () => {
+    sendMessage.mockResolvedValue({ ok: true, data: undefined });
+
+    await new ContentAssistantBridge().initialize();
+
+    expect(sendMessage).toHaveBeenCalledWith({ type: 'context:get' });
+  });
+
+  it('routes explicit activation, deactivation, and API key status through background', async () => {
+    sendMessage.mockResolvedValue({ ok: true, data: undefined });
+    const bridge = new ContentAssistantBridge();
+
+    await bridge.activate();
+    await bridge.deactivate();
+    await bridge.hasApiKey();
+
+    expect(sendMessage).toHaveBeenNthCalledWith(1, {
+      type: 'context:activate',
+    });
+    expect(sendMessage).toHaveBeenNthCalledWith(2, {
+      type: 'context:clear',
+    });
+    expect(sendMessage).toHaveBeenNthCalledWith(3, {
+      type: 'settings:has-key',
+    });
+  });
+
   it('surfaces a background failure when settings cannot open', async () => {
     sendMessage.mockResolvedValue({ ok: false, error: '无法打开设置' });
 

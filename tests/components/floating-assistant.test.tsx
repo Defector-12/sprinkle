@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   FloatingAssistant,
@@ -28,12 +28,21 @@ const readyContext: PageContext = {
   updatedAt: 1,
 };
 
+const unactivatedContext: PageContext = {
+  ...readyContext,
+  status: 'unactivated',
+  article: null,
+};
+
 function createBridge(
   context: PageContext = readyContext,
   overrides: Partial<FloatingAssistantBridge> = {},
 ): FloatingAssistantBridge {
   return {
     initialize: vi.fn().mockResolvedValue(context),
+    activate: vi.fn().mockResolvedValue(readyContext),
+    deactivate: vi.fn().mockResolvedValue(unactivatedContext),
+    hasApiKey: vi.fn().mockResolvedValue(true),
     ask: vi.fn().mockResolvedValue(context),
     openSettings: vi.fn().mockResolvedValue(undefined),
     subscribe: vi.fn().mockReturnValue(() => undefined),
@@ -42,17 +51,28 @@ function createBridge(
 }
 
 describe('FloatingAssistant', () => {
-  it('automatically initializes the page while rendering only a floating button', async () => {
-    const bridge = createBridge();
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('keeps a new page dormant until the toolbar explicitly activates it', async () => {
+    const bridge = createBridge(unactivatedContext);
     render(<FloatingAssistant bridge={bridge} />);
 
-    expect(
-      screen.getByRole('button', { name: '打开 Context Reader' }),
-    ).toBeVisible();
-    expect(
-      screen.queryByRole('dialog', { name: 'Context Reader 对话' }),
-    ).not.toBeInTheDocument();
     await waitFor(() => expect(bridge.initialize).toHaveBeenCalledOnce());
+    expect(bridge.activate).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole('button', { name: '打开 Context Reader' }),
+    ).not.toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('context-reader:open'));
+    });
+
+    expect(bridge.activate).toHaveBeenCalledOnce();
+    expect(
+      await screen.findByRole('dialog', { name: 'Context Reader 对话' }),
+    ).toBeVisible();
   });
 
   it('opens a compact dialog from the floating button and closes with Escape', async () => {
@@ -132,6 +152,80 @@ describe('FloatingAssistant', () => {
     ).toBeVisible();
   });
 
+  it('shows an explicit understanding state while the page is being parsed', async () => {
+    const bridge = createBridge(unactivatedContext, {
+      activate: vi.fn().mockReturnValue(new Promise(() => undefined)),
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+    await waitFor(() => expect(bridge.initialize).toHaveBeenCalledOnce());
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('context-reader:open'));
+    });
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '正在理解页面内容',
+    );
+    expect(screen.getByText('正在提取标题、段落和代码块')).toBeVisible();
+  });
+
+  it('explains when the API key is missing and disables questions', async () => {
+    const bridge = createBridge(readyContext, {
+      hasApiKey: vi.fn().mockResolvedValue(false),
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('尚未配置 API Key');
+    expect(
+      screen.getByRole('button', { name: '填写 API Key' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('textbox', { name: '向当前文章提问' }),
+    ).toBeDisabled();
+  });
+
+  it('shows readiness details and can explicitly stop understanding the page', async () => {
+    const context = {
+      ...readyContext,
+      article: {
+        ...readyContext.article!,
+        blocks: [
+          {
+            id: 'block-1',
+            type: 'paragraph' as const,
+            text: 'Agent memory stores durable context.',
+            section: 'Memory',
+            order: 0,
+          },
+        ],
+      },
+    };
+    const bridge = createBridge(context);
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('页面内容已理解');
+    expect(screen.getByRole('status')).toHaveTextContent('已读取 1 个内容块');
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '停止理解当前页面' }),
+    );
+
+    expect(bridge.deactivate).toHaveBeenCalledOnce();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: '打开 Context Reader' }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
   it('drags the floating button without triggering a click-open', async () => {
     const bridge = createBridge();
     render(<FloatingAssistant bridge={bridge} />);
@@ -202,5 +296,86 @@ describe('FloatingAssistant', () => {
     expect(maxHeight).toBeGreaterThan(0);
     // The card must fit within the viewport, never spilling off-screen.
     expect(maxHeight).toBeLessThanOrEqual(window.innerHeight);
+  });
+
+  it('resizes the conversation window from its visible corner handle', async () => {
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    const dialog = screen.getByRole('dialog', {
+      name: 'Context Reader 对话',
+    });
+    vi.spyOn(dialog, 'getBoundingClientRect').mockReturnValue({
+      x: 612,
+      y: 180,
+      width: 400,
+      height: 400,
+      top: 180,
+      right: 1012,
+      bottom: 580,
+      left: 612,
+      toJSON: () => undefined,
+    });
+    const handle = screen.getByRole('separator', {
+      name: '调整对话框大小',
+    });
+    const pointer = (type: string, clientX: number, clientY: number) =>
+      act(() => {
+        handle.dispatchEvent(
+          new MouseEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            clientX,
+            clientY,
+          }),
+        );
+      });
+
+    pointer('pointerdown', 612, 180);
+    pointer('pointermove', 512, 80);
+    pointer('pointerup', 512, 80);
+
+    expect(dialog.style.width).toBe('500px');
+    expect(dialog.style.height).toBe('500px');
+  });
+
+  it('keeps the orb inside the visual viewport after browser zoom changes', async () => {
+    const visualViewport = new EventTarget() as VisualViewport;
+    Object.assign(visualViewport, {
+      width: 320,
+      height: 480,
+      offsetLeft: 40,
+      offsetTop: 20,
+      pageLeft: 40,
+      pageTop: 20,
+      scale: 2,
+    });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: visualViewport,
+    });
+
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+
+    const orb = await screen.findByRole('button', {
+      name: '打开 Context Reader',
+    });
+    expect(orb.style.left).toBe('294px');
+    expect(orb.style.top).toBe('434px');
+
+    Object.assign(visualViewport, { width: 240, height: 360 });
+    act(() => visualViewport.dispatchEvent(new Event('resize')));
+
+    await waitFor(() => expect(orb.style.left).toBe('214px'));
+    expect(orb.style.top).toBe('314px');
+
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: null,
+    });
   });
 });
