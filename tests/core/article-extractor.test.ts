@@ -92,6 +92,77 @@ describe('extractArticle', () => {
     );
   });
 
+  it('extracts X article text rendered through div and span containers', () => {
+    document.title = 'Article / X';
+    document.body.innerHTML = `
+      <main role="main">
+        <article data-testid="tweet">
+          <div data-testid="User-Name">硅基流动 @fallai2015</div>
+          <div data-testid="longformContent">
+            <div>
+              <span>梁文锋投资者交流会（完整版全文）</span>
+            </div>
+            <div>
+              <span>欢迎各位投资人。我们一开始来做这个公司，初衷是没有想到最后要赚多少钱，更多资本市场上去，要上市，要怎么样的，所以我们是没有这个初衷的。</span>
+            </div>
+            <div>
+              <span>我们投资这个公司是没有这么想过。如果他这么想，他就不会来。所以总体讲，我们是怀着一个对这个世界非常大的善意来做这个事情。</span>
+            </div>
+          </div>
+          <div role="group" aria-label="互动">
+            <button>回复 218</button>
+            <button>转发 1.5K</button>
+          </div>
+        </article>
+      </main>
+    `;
+
+    const article = extractArticle(
+      document,
+      'https://x.com/fallai2015/status/123',
+    );
+
+    expect(article.isPartial).toBe(false);
+    expect(article.blocks.map((block) => block.text)).toEqual([
+      '梁文锋投资者交流会（完整版全文）',
+      '欢迎各位投资人。我们一开始来做这个公司，初衷是没有想到最后要赚多少钱，更多资本市场上去，要上市，要怎么样的，所以我们是没有这个初衷的。',
+      '我们投资这个公司是没有这么想过。如果他这么想，他就不会来。所以总体讲，我们是怀着一个对这个世界非常大的善意来做这个事情。',
+    ]);
+    expect(article.blocks.map((block) => block.text).join(' ')).not.toContain(
+      '回复 218',
+    );
+    expect(article.diagnostics).toEqual(
+      expect.objectContaining({
+        fallbackUsed: true,
+        fallbackBlockCount: 3,
+      }),
+    );
+  });
+
+  it('falls back to leaf text containers without duplicating React wrapper text', () => {
+    document.body.innerHTML = `
+      <article>
+        <div class="article-shell">
+          <div class="title">A custom rendered technical article</div>
+          <div class="body">
+            <div><span>${'First custom paragraph '.repeat(5)}</span></div>
+            <div><span>${'Second custom paragraph '.repeat(5)}</span></div>
+          </div>
+        </div>
+        <div role="toolbar"><button>Share</button></div>
+      </article>
+    `;
+
+    const article = extractArticle(document, 'https://example.com/custom');
+
+    expect(article.isPartial).toBe(false);
+    expect(article.blocks).toHaveLength(3);
+    expect(article.blocks.map((block) => block.text).join(' ')).not.toContain(
+      'Share',
+    );
+    expect(new Set(article.blocks.map((block) => block.text)).size).toBe(3);
+  });
+
   it('uses document metadata fallbacks and handles lists, quotes, and lazy images', () => {
     document.title = 'Fallback document title';
     document.body.innerHTML = `
