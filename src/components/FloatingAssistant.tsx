@@ -64,6 +64,11 @@ interface DialogSize {
   height: number;
 }
 
+interface DialogPosition {
+  x: number;
+  y: number;
+}
+
 interface ViewportBounds {
   left: number;
   top: number;
@@ -146,8 +151,58 @@ function snapToEdge({ x, y }: OrbPosition): OrbPosition {
 function dialogLayout(
   { x, y }: OrbPosition,
   requestedSize: DialogSize | null,
+  requestedPosition: DialogPosition | null,
 ): DialogLayout {
   const bounds = viewport();
+  const viewportWidth = Math.max(160, bounds.width - DIALOG_MARGIN * 2);
+  const viewportHeight = Math.max(120, bounds.height - DIALOG_MARGIN * 2);
+
+  if (requestedPosition && requestedSize) {
+    const maxWidth = Math.min(DIALOG_MAX_WIDTH, viewportWidth);
+    const maxHeight = Math.min(DIALOG_MAX_HEIGHT, viewportHeight);
+    const width = clamp(
+      requestedSize.width,
+      Math.min(DIALOG_MIN_WIDTH, maxWidth),
+      maxWidth,
+    );
+    const height = clamp(
+      requestedSize.height,
+      Math.min(DIALOG_MIN_HEIGHT, maxHeight),
+      maxHeight,
+    );
+    const left = clamp(
+      requestedPosition.x,
+      bounds.left + DIALOG_MARGIN,
+      Math.max(
+        bounds.left + DIALOG_MARGIN,
+        bounds.right - DIALOG_MARGIN - width,
+      ),
+    );
+    const top = clamp(
+      requestedPosition.y,
+      bounds.top + DIALOG_MARGIN,
+      Math.max(
+        bounds.top + DIALOG_MARGIN,
+        bounds.bottom - DIALOG_MARGIN - height,
+      ),
+    );
+
+    return {
+      opensBelow: true,
+      growsLeft: left + width / 2 >= bounds.left + bounds.width / 2,
+      maxWidth,
+      maxHeight,
+      style: {
+        left,
+        top,
+        width,
+        height,
+        maxWidth,
+        maxHeight,
+      },
+    };
+  }
+
   const orbCenterX = x + ORB_SIZE / 2;
   const growsLeft = orbCenterX >= bounds.left + bounds.width / 2;
   const anchorLeft = Math.max(bounds.left + DIALOG_MARGIN, x);
@@ -155,7 +210,6 @@ function dialogLayout(
   const availableWidth = growsLeft
     ? anchorRight - (bounds.left + DIALOG_MARGIN)
     : bounds.right - DIALOG_MARGIN - anchorLeft;
-  const viewportWidth = Math.max(160, bounds.width - DIALOG_MARGIN * 2);
   const maxWidth = Math.min(
     DIALOG_MAX_WIDTH,
     viewportWidth,
@@ -336,7 +390,10 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     defaultOrbPosition(),
   );
   const [dialogSize, setDialogSize] = useState<DialogSize | null>(null);
+  const [dialogPosition, setDialogPosition] =
+    useState<DialogPosition | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isMovingDialog, setIsMovingDialog] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [revealed, setRevealed] = useState<{ id: string; count: number } | null>(
     null,
@@ -357,15 +414,24 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     pointerId: number;
     startX: number;
     startY: number;
+    startLeft: number;
+    startTop: number;
+    startRight: number;
     startWidth: number;
     startHeight: number;
     growsLeft: boolean;
-    growsUp: boolean;
     maxWidth: number;
     maxHeight: number;
   } | null>(null);
+  const moveState = useRef<{
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const draggedRef = useRef(false);
-  const layout = dialogLayout(orbPos, dialogSize);
+  const layout = dialogLayout(orbPos, dialogSize, dialogPosition);
 
   async function refreshApiKeyStatus() {
     try {
@@ -408,6 +474,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       setIsOpen(false);
       setIsVisible(false);
       setDialogSize(null);
+      setDialogPosition(null);
       setQuestion('');
     } catch (cause) {
       setError(
@@ -585,17 +652,27 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   function onResizePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     const rect = dialogRef.current?.getBoundingClientRect();
     if (!rect) return;
+    const bounds = viewport();
+    const growsLeft = layout.growsLeft;
+    const maxWidth = growsLeft
+      ? rect.right - (bounds.left + DIALOG_MARGIN)
+      : bounds.right - DIALOG_MARGIN - rect.left;
+    const maxHeight = bounds.bottom - DIALOG_MARGIN - rect.top;
     resizeState.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
+      startLeft: rect.left,
+      startTop: rect.top,
+      startRight: rect.right,
       startWidth: rect.width,
       startHeight: rect.height,
-      growsLeft: layout.growsLeft,
-      growsUp: !layout.opensBelow,
-      maxWidth: layout.maxWidth,
-      maxHeight: layout.maxHeight,
+      growsLeft,
+      maxWidth: Math.min(DIALOG_MAX_WIDTH, maxWidth),
+      maxHeight: Math.min(DIALOG_MAX_HEIGHT, maxHeight),
     };
+    setDialogPosition({ x: rect.left, y: rect.top });
+    setDialogSize({ width: rect.width, height: rect.height });
     setIsResizing(true);
     event.currentTarget.setPointerCapture?.(event.pointerId);
     event.preventDefault();
@@ -608,17 +685,23 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     const heightDelta = event.clientY - state.startY;
     const minWidth = Math.min(DIALOG_MIN_WIDTH, state.maxWidth);
     const minHeight = Math.min(DIALOG_MIN_HEIGHT, state.maxHeight);
+    const width = clamp(
+      state.startWidth + (state.growsLeft ? -widthDelta : widthDelta),
+      minWidth,
+      state.maxWidth,
+    );
+    const height = clamp(
+      state.startHeight + heightDelta,
+      minHeight,
+      state.maxHeight,
+    );
     setDialogSize({
-      width: clamp(
-        state.startWidth + (state.growsLeft ? -widthDelta : widthDelta),
-        minWidth,
-        state.maxWidth,
-      ),
-      height: clamp(
-        state.startHeight + (state.growsUp ? -heightDelta : heightDelta),
-        minHeight,
-        state.maxHeight,
-      ),
+      width,
+      height,
+    });
+    setDialogPosition({
+      x: state.growsLeft ? state.startRight - width : state.startLeft,
+      y: state.startTop,
     });
   }
 
@@ -630,6 +713,93 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       event.currentTarget.releasePointerCapture?.(event.pointerId);
     }
     setIsResizing(false);
+  }
+
+  function onMovePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    const rect = dialogRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    moveState.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    setDialogPosition({ x: rect.left, y: rect.top });
+    setDialogSize({ width: rect.width, height: rect.height });
+    setIsMovingDialog(true);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  }
+
+  function onMovePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const state = moveState.current;
+    if (!state || state.pointerId !== event.pointerId) return;
+    const bounds = viewport();
+    setDialogPosition({
+      x: clamp(
+        event.clientX - state.offsetX,
+        bounds.left + DIALOG_MARGIN,
+        Math.max(
+          bounds.left + DIALOG_MARGIN,
+          bounds.right - DIALOG_MARGIN - state.width,
+        ),
+      ),
+      y: clamp(
+        event.clientY - state.offsetY,
+        bounds.top + DIALOG_MARGIN,
+        Math.max(
+          bounds.top + DIALOG_MARGIN,
+          bounds.bottom - DIALOG_MARGIN - state.height,
+        ),
+      ),
+    });
+  }
+
+  function endDialogMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const state = moveState.current;
+    if (!state || state.pointerId !== event.pointerId) return;
+    moveState.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    }
+    setIsMovingDialog(false);
+  }
+
+  function moveDialogWithKeyboard(
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ): void {
+    const rect = dialogRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const step = event.shiftKey ? 32 : 16;
+    let x = dialogPosition?.x ?? rect.left;
+    let y = dialogPosition?.y ?? rect.top;
+    if (event.key === 'ArrowRight') x += step;
+    else if (event.key === 'ArrowLeft') x -= step;
+    else if (event.key === 'ArrowDown') y += step;
+    else if (event.key === 'ArrowUp') y -= step;
+    else return;
+    const bounds = viewport();
+    event.preventDefault();
+    setDialogSize({ width: rect.width, height: rect.height });
+    setDialogPosition({
+      x: clamp(
+        x,
+        bounds.left + DIALOG_MARGIN,
+        Math.max(
+          bounds.left + DIALOG_MARGIN,
+          bounds.right - DIALOG_MARGIN - rect.width,
+        ),
+      ),
+      y: clamp(
+        y,
+        bounds.top + DIALOG_MARGIN,
+        Math.max(
+          bounds.top + DIALOG_MARGIN,
+          bounds.bottom - DIALOG_MARGIN - rect.height,
+        ),
+      ),
+    });
   }
 
   function resizeWithKeyboard(
@@ -646,17 +816,26 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     else if (event.key === 'ArrowUp') height -= step;
     else return;
     event.preventDefault();
-    setDialogSize({
-      width: clamp(
-        width,
-        Math.min(DIALOG_MIN_WIDTH, layout.maxWidth),
-        layout.maxWidth,
-      ),
-      height: clamp(
-        height,
-        Math.min(DIALOG_MIN_HEIGHT, layout.maxHeight),
-        layout.maxHeight,
-      ),
+    const bounds = viewport();
+    const growsLeft = layout.growsLeft;
+    const maxWidth = growsLeft
+      ? rect.right - (bounds.left + DIALOG_MARGIN)
+      : bounds.right - DIALOG_MARGIN - rect.left;
+    const maxHeight = bounds.bottom - DIALOG_MARGIN - rect.top;
+    width = clamp(
+      width,
+      Math.min(DIALOG_MIN_WIDTH, maxWidth),
+      Math.min(DIALOG_MAX_WIDTH, maxWidth),
+    );
+    height = clamp(
+      height,
+      Math.min(DIALOG_MIN_HEIGHT, maxHeight),
+      Math.min(DIALOG_MAX_HEIGHT, maxHeight),
+    );
+    setDialogSize({ width, height });
+    setDialogPosition({
+      x: growsLeft ? rect.right - width : rect.left,
+      y: rect.top,
     });
   }
 
@@ -697,21 +876,33 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     );
   }
 
-  const resizeCorner = `${layout.opensBelow ? 'bottom' : 'top'}-${
-    layout.growsLeft ? 'left' : 'right'
-  }`;
+  const resizeCorner = `bottom-${layout.growsLeft ? 'left' : 'right'}`;
 
   return (
     <section
       ref={dialogRef}
       id="context-reader-dialog"
-      className={`cr-dialog${isResizing ? ' cr-dialog--resizing' : ''}`}
+      className={`cr-dialog${isResizing ? ' cr-dialog--resizing' : ''}${
+        isMovingDialog ? ' cr-dialog--moving' : ''
+      }`}
       role="dialog"
       aria-label="Context Reader 对话"
       style={layout.style}
     >
       <header className="cr-header">
-        <div className="cr-header__identity">
+        <div
+          className="cr-header__identity cr-header__drag"
+          role="button"
+          aria-label="移动对话框"
+          aria-description="拖动移动窗口，或使用方向键调整位置"
+          title="拖动移动整个对话框"
+          tabIndex={0}
+          onPointerDown={onMovePointerDown}
+          onPointerMove={onMovePointerMove}
+          onPointerUp={endDialogMove}
+          onPointerCancel={endDialogMove}
+          onKeyDown={moveDialogWithKeyboard}
+        >
           <span className="cr-mark" aria-hidden="true">
             C
           </span>
@@ -863,6 +1054,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
         role="separator"
         aria-label="调整对话框大小"
         aria-description="拖动调整大小，或使用方向键调整宽高"
+        title="拖动调整整个对话框大小"
         tabIndex={0}
         onPointerDown={onResizePointerDown}
         onPointerMove={onResizePointerMove}

@@ -73,6 +73,7 @@ button {
 
 button:focus-visible,
 textarea:focus-visible,
+.cr-header__drag:focus-visible,
 .cr-resize-handle:focus-visible {
   outline: 2px solid var(--cr-color-focus);
   outline-offset: 2px;
@@ -162,7 +163,8 @@ textarea:disabled {
   animation: cr-dialog-in var(--cr-duration-base) var(--cr-ease-out);
 }
 
-.cr-dialog--resizing {
+.cr-dialog--resizing,
+.cr-dialog--moving {
   user-select: none;
 }
 
@@ -179,9 +181,30 @@ textarea:disabled {
 
 .cr-header__identity {
   display: flex;
+  flex: 1 1 auto;
   min-width: 0;
   align-items: center;
   gap: var(--cr-space-2);
+}
+
+.cr-header__drag {
+  min-height: 38px;
+  margin: -4px 0 -4px -4px;
+  border-radius: var(--cr-radius-sm);
+  padding: 4px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  transition: background var(--cr-duration-fast) var(--cr-ease-out);
+}
+
+.cr-header__drag:hover {
+  background: var(--cr-color-surface-muted);
+}
+
+.cr-dialog--moving .cr-header__drag {
+  cursor: grabbing;
+  background: var(--cr-color-surface-muted);
 }
 
 .cr-mark {
@@ -622,31 +645,43 @@ textarea:disabled {
 
 .cr-resize-handle {
   position: absolute;
-  z-index: 2;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
+  z-index: 3;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--cr-color-border);
+  border-radius: var(--cr-radius-sm);
+  background: var(--cr-color-surface);
+  box-shadow: 0 1px 4px var(--cr-color-overlay);
   touch-action: none;
+  transition:
+    border-color var(--cr-duration-fast) var(--cr-ease-out),
+    background var(--cr-duration-fast) var(--cr-ease-out);
+}
+
+.cr-resize-handle:hover,
+.cr-resize-handle:focus-visible {
+  border-color: var(--cr-color-ink-muted);
+  background: var(--cr-color-surface-muted);
 }
 
 .cr-resize-handle::before,
 .cr-resize-handle::after {
   position: absolute;
-  width: 8px;
-  height: 1px;
+  width: 10px;
+  height: 2px;
   border-radius: var(--cr-radius-round);
   background: var(--cr-color-ink-muted);
   content: "";
-  opacity: 0.62;
+  opacity: 0.8;
 }
 
 .cr-resize-handle::after {
-  width: 5px;
+  width: 6px;
 }
 
 .cr-resize-handle--bottom-right {
-  right: 0;
-  bottom: 0;
+  right: 4px;
+  bottom: 4px;
   cursor: nwse-resize;
 }
 
@@ -663,8 +698,8 @@ textarea:disabled {
 }
 
 .cr-resize-handle--bottom-left {
-  bottom: 0;
-  left: 0;
+  bottom: 4px;
+  left: 4px;
   cursor: nesw-resize;
 }
 
@@ -678,42 +713,6 @@ textarea:disabled {
 
 .cr-resize-handle--bottom-left::after {
   bottom: 4px;
-}
-
-.cr-resize-handle--top-right {
-  top: 0;
-  right: 0;
-  cursor: nesw-resize;
-}
-
-.cr-resize-handle--top-right::before,
-.cr-resize-handle--top-right::after {
-  top: 7px;
-  right: 4px;
-  transform: rotate(45deg);
-  transform-origin: right center;
-}
-
-.cr-resize-handle--top-right::after {
-  top: 4px;
-}
-
-.cr-resize-handle--top-left {
-  top: 0;
-  left: 0;
-  cursor: nwse-resize;
-}
-
-.cr-resize-handle--top-left::before,
-.cr-resize-handle--top-left::after {
-  top: 7px;
-  left: 4px;
-  transform: rotate(-45deg);
-  transform-origin: left center;
-}
-
-.cr-resize-handle--top-left::after {
-  top: 4px;
 }
 
 .cr-sr-only {
