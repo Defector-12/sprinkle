@@ -356,10 +356,7 @@ textarea:focus-visible,
 
 .study-chat {
   grid-template-rows: 78px minmax(0, 1fr) auto auto;
-  background:
-    linear-gradient(var(--study-line) 1px, transparent 1px),
-    oklch(96.5% 0.01 77);
-  background-size: 100% 30px;
+  background: oklch(96.5% 0.01 77);
 }
 
 .study-chat__header {
