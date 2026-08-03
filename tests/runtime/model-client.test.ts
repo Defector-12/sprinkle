@@ -287,13 +287,19 @@ describe('RoutedModelClient', () => {
         { textApiKey: 'deepseek-key', visionApiKey: 'ark-key' },
         request,
       ),
-    ).resolves.toBe('text answer');
+    ).resolves.toEqual({
+      content: 'text answer',
+      model: 'deepseek',
+    });
     await expect(
       client.complete(
         { textApiKey: 'deepseek-key', visionApiKey: 'ark-key' },
         imageRequest,
       ),
-    ).resolves.toBe('vision answer');
+    ).resolves.toEqual({
+      content: 'vision answer',
+      model: 'doubao',
+    });
 
     expect(textClient.complete).toHaveBeenCalledOnce();
     expect(textClient.complete).toHaveBeenCalledWith('deepseek-key', request);

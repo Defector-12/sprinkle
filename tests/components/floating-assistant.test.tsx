@@ -238,6 +238,7 @@ describe('FloatingAssistant', () => {
           role: 'assistant',
           content: '这里指模型按输入选择部分专家网络参与计算。',
           createdAt: 2,
+          answeredBy: 'deepseek',
         },
       ],
     };
@@ -257,6 +258,44 @@ describe('FloatingAssistant', () => {
     expect(
       await screen.findByText('这里指模型按输入选择部分专家网络参与计算。'),
     ).toBeVisible();
+    expect(screen.getByText('DeepSeek')).toBeVisible();
+  });
+
+  it('labels each answer with its actual model and keeps a fallback for old messages', async () => {
+    const bridge = createBridge({
+      ...readyContext,
+      messages: [
+        {
+          id: 'assistant-doubao',
+          role: 'assistant',
+          content: '这是图片回答。',
+          createdAt: 1,
+          answeredBy: 'doubao',
+        },
+        {
+          id: 'assistant-deepseek',
+          role: 'assistant',
+          content: '这是文本追问回答。',
+          createdAt: 2,
+          answeredBy: 'deepseek',
+        },
+        {
+          id: 'assistant-legacy',
+          role: 'assistant',
+          content: '这是升级前的历史回答。',
+          createdAt: 3,
+        },
+      ],
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+
+    expect(screen.getByText('Doubao')).toBeVisible();
+    expect(screen.getByText('DeepSeek')).toBeVisible();
+    expect(screen.getByText('助手')).toBeVisible();
   });
 
   it('shows an explicit understanding state while the page is being parsed', async () => {
