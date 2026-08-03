@@ -2,6 +2,7 @@ import { browser, type Browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
 
 import { ContextRegistry } from '../src/core/context-registry.ts';
+import { completeQuestionTurn } from '../src/core/conversation-turn.ts';
 import { buildModelRequest } from '../src/core/model-request.ts';
 import {
   createArticleChunks,
@@ -240,12 +241,10 @@ async function askPage(
       },
       request,
     );
-    const completed: PageContext = {
-      ...withQuestion,
-      status: current.article.isPartial ? 'partial' : 'ready',
-      messages: [...withQuestion.messages, message('assistant', answer)],
-      updatedAt: Date.now(),
-    };
+    const completed = completeQuestionTurn(
+      withQuestion,
+      message('assistant', answer),
+    );
     await contexts.save(completed);
     if (settings.retainConversations) {
       await conversations.save(completed);
