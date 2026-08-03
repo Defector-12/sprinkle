@@ -68,7 +68,10 @@ Floating Assistant
 - 是 WXT 未列出 HTML 入口 `study.html`，由悬浮窗显式打开为独立标签页。
 - 通过不可变的 `tabId + URL` 读取和更新原页面上下文，不依赖当前活动标签页。
 - 左侧根据 `ArticleDocument` 重建语义化阅读视图，并按提取顺序回填图片和图表，避免外站 `X-Frame-Options` 和 CSP 阻止 iframe。
+- 目录由已提取标题及其层级生成，点击后滚动到对应标题；原文中的锚点目录列表不会重复进入正文。
+- 表格使用原生语义表格安全重建；公式使用白名单 MathML，缺失 MathML 时回退为 TeX 文本。
 - 右侧复用后台问答编排、DeepSeek/Doubao 路由、模型标签和消息归档。
+- 新回答在客户端逐字揭示，并遵循 `prefers-reduced-motion`。
 - 划词后在选区附近提供快捷提问；点图模式直接构造 `FocusContext`；区域引用先截取当前工作台可见区域，再写入临时上下文。
 - 原标签页关闭后其 session 上下文被清除，工作台下次操作时明确提示上下文失效。
 
@@ -125,8 +128,11 @@ article -> main -> [role="main"] -> body
 - `blockquote`
 - `ul` / `ol`
 - `img`、语义化 SVG 图表和 Canvas 图表
+- `table` 的 caption、行、表头、单元格与跨行跨列信息
+- KaTeX/MathML 公式的 TeX annotation 和白名单 MathML
 
 媒体项记录其前方已接受正文块数量，工作台据此将图片和图表穿插回原文位置。没有位置字段的旧会话按所属章节末尾回退显示。
+表格与公式同样记录正文插入位置。MathML 只保留数学元素和必要属性，移除脚本、事件处理器和外链内容。
 
 当上述语义节点不足 80 个字符时，执行安全回退：
 

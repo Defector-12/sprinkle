@@ -19,11 +19,14 @@ import {
 
 import type {
   ArticleBlock,
+  ArticleFormula,
   ArticleImage,
+  ArticleTable,
   ImageFocus,
   PageContext,
   RegionFocus,
 } from '../core/types.ts';
+import { sanitizeMathMl } from '../core/mathml.ts';
 import type { StudyCaptureRect } from '../runtime/messages.ts';
 
 export interface StudyWorkspaceBridgeContract {
@@ -64,6 +67,8 @@ interface SelectionAction {
 
 const MIN_READER_WIDTH = 30;
 const MAX_READER_WIDTH = 75;
+const STREAM_INTERVAL_MS = 18;
+const STREAM_STEP = 2;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -78,13 +83,31 @@ function messageAuthor(
   return '助手';
 }
 
+function headingId(block: ArticleBlock): string {
+  return `study-heading-${block.id}`;
+}
+
 function blockElement(block: ArticleBlock) {
   const attributes = {
     'data-section': block.section,
   };
   switch (block.type) {
-    case 'heading':
-      return <h2 key={block.id} {...attributes}>{block.text}</h2>;
+    case 'heading': {
+      const level = clamp(block.level ?? 2, 2, 6);
+      if (level === 3) {
+        return <h3 key={block.id} id={headingId(block)} {...attributes}>{block.text}</h3>;
+      }
+      if (level === 4) {
+        return <h4 key={block.id} id={headingId(block)} {...attributes}>{block.text}</h4>;
+      }
+      if (level === 5) {
+        return <h5 key={block.id} id={headingId(block)} {...attributes}>{block.text}</h5>;
+      }
+      if (level === 6) {
+        return <h6 key={block.id} id={headingId(block)} {...attributes}>{block.text}</h6>;
+      }
+      return <h2 key={block.id} id={headingId(block)} {...attributes}>{block.text}</h2>;
+    }
     case 'code':
       return (
         <pre key={block.id} {...attributes}>
@@ -102,6 +125,80 @@ function blockElement(block: ArticleBlock) {
     default:
       return <p key={block.id} {...attributes}>{block.text}</p>;
   }
+}
+
+function TableView({ table }: { table: ArticleTable }) {
+  return (
+    <div className="study-table-wrap" data-section={table.section}>
+      <table aria-label={table.caption || `表格：${table.section}`}>
+        {table.caption && <caption>{table.caption}</caption>}
+        <tbody>
+          {table.rows.map((row, rowIndex) => (
+            <tr key={`${table.id}-row-${rowIndex}`}>
+              {row.cells.map((cell, cellIndex) => {
+                const Cell = cell.header ? 'th' : 'td';
+                return (
+                  <Cell
+                    key={`${table.id}-cell-${rowIndex}-${cellIndex}`}
+                    colSpan={cell.colSpan}
+                    rowSpan={cell.rowSpan}
+                    scope={
+                      cell.header
+                        ? rowIndex === 0
+                          ? 'col'
+                          : 'row'
+                        : undefined
+                    }
+                  >
+                    {cell.text}
+                  </Cell>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FormulaView({ formula }: { formula: ArticleFormula }) {
+  const formulaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = formulaRef.current;
+    if (!container) return;
+    container.replaceChildren();
+    const safeMathMl = sanitizeMathMl(formula.mathml);
+    if (safeMathMl) {
+      const parsed = new DOMParser().parseFromString(
+        safeMathMl,
+        'application/xml',
+      );
+      if (!parsed.querySelector('parsererror')) {
+        container.append(document.importNode(parsed.documentElement, true));
+        return;
+      }
+    }
+    container.textContent = formula.tex;
+  }, [formula.mathml, formula.tex]);
+
+  return (
+    <div
+      ref={formulaRef}
+      className={`study-formula study-formula--${formula.display}`}
+      data-testid={`study-formula-${formula.id}`}
+      data-section={formula.section}
+      aria-label={formula.tex || '数学公式'}
+    />
+  );
+}
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
 }
 
 function imageOrder(
@@ -199,12 +296,18 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
   const [regionMode, setRegionMode] = useState(false);
   const [capturingRegion, setCapturingRegion] = useState(false);
   const [region, setRegion] = useState<RegionSelection | null>(null);
+  const [streamingTarget, setStreamingTarget] = useState<{
+    id: string;
+    content: string;
+  } | null>(null);
+  const [revealedCount, setRevealedCount] = useState(0);
   const workspaceRef = useRef<HTMLElement>(null);
   const documentRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const dividerDrag = useRef(false);
   const regionDrag = useRef(false);
   const regionRef = useRef<RegionSelection | null>(null);
+  const awaitingAnswerRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -221,13 +324,45 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
         }
       });
     const unsubscribe = bridge.subscribe((nextContext) => {
-      if (active) setContext(nextContext);
+      if (!active) return;
+      const answer = nextContext.messages.at(-1);
+      if (awaitingAnswerRef.current && answer?.role === 'assistant') {
+        awaitingAnswerRef.current = false;
+        setRevealedCount(0);
+        setStreamingTarget({
+          id: answer.id,
+          content: answer.content,
+        });
+      }
+      setContext(nextContext);
     });
     return () => {
       active = false;
       unsubscribe();
     };
   }, [bridge]);
+
+  useEffect(() => {
+    if (!streamingTarget) return;
+    if (prefersReducedMotion()) {
+      setRevealedCount(streamingTarget.content.length);
+      return;
+    }
+
+    setRevealedCount(0);
+    let count = 0;
+    const timer = window.setInterval(() => {
+      count = Math.min(
+        streamingTarget.content.length,
+        count + STREAM_STEP,
+      );
+      setRevealedCount(count);
+      if (count >= streamingTarget.content.length) {
+        window.clearInterval(timer);
+      }
+    }, STREAM_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [streamingTarget]);
 
   function resizeFromPointer(clientX: number) {
     if (!Number.isFinite(clientX)) return;
@@ -366,11 +501,23 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     const value = question.trim();
     if (!value || busy) return;
     setBusy(true);
+    awaitingAnswerRef.current = true;
     setError(null);
     try {
-      setContext(await bridge.ask(value));
+      const nextContext = await bridge.ask(value);
+      setContext(nextContext);
+      const answer = nextContext.messages.at(-1);
+      if (awaitingAnswerRef.current && answer?.role === 'assistant') {
+        awaitingAnswerRef.current = false;
+        setRevealedCount(0);
+        setStreamingTarget({
+          id: answer.id,
+          content: answer.content,
+        });
+      }
       setQuestion('');
     } catch (cause) {
+      awaitingAnswerRef.current = false;
       setError(cause instanceof Error ? cause.message : '问题发送失败');
     } finally {
       setBusy(false);
@@ -402,6 +549,21 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     images.push(image);
     imagesByOrder.set(order, images);
   }
+  const tablesByOrder = new Map<number, ArticleTable[]>();
+  for (const table of article.tables ?? []) {
+    const tables = tablesByOrder.get(table.order) ?? [];
+    tables.push(table);
+    tablesByOrder.set(table.order, tables);
+  }
+  const formulasByOrder = new Map<number, ArticleFormula[]>();
+  for (const formula of article.formulas ?? []) {
+    const formulas = formulasByOrder.get(formula.order) ?? [];
+    formulas.push(formula);
+    formulasByOrder.set(formula.order, formulas);
+  }
+  const headings = article.blocks.filter(
+    (block) => block.type === 'heading' && (block.level ?? 2) >= 2,
+  );
 
   return (
     <main
@@ -480,35 +642,73 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
             });
           }}
         >
-          <div className="study-document__meta">
-            <span>{new URL(article.url).hostname}</span>
-            <span>{article.blocks.length} 个内容块</span>
-          </div>
-          <h1 id="study-document-title">{article.title}</h1>
-          <a href={article.url} target="_blank" rel="noreferrer">
-            {article.url}
-          </a>
-          <div className="study-document__rule" aria-hidden="true" />
-          {Array.from(
-            { length: article.blocks.length + 1 },
-            (_, order) => (
-              <Fragment key={`flow-${order}`}>
-                {(imagesByOrder.get(order) ?? []).map((image) => (
-                  <ArticleImageView
-                    key={image.id}
-                    image={image}
-                    picking={imagePickMode}
-                    onQuote={(nextImage, rect) =>
-                      void quoteImage(nextImage, rect)
-                    }
-                  />
+          {headings.length > 0 && (
+            <nav className="study-toc" aria-label="资料目录">
+              <strong>On this page <span>本页内容</span></strong>
+              <ol>
+                {headings.map((heading) => (
+                  <li key={`toc-${heading.id}`}>
+                    <a
+                      href={`#${headingId(heading)}`}
+                      data-level={heading.level ?? 2}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        document
+                          .getElementById(headingId(heading))
+                          ?.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'start',
+                          });
+                      }}
+                    >
+                      {heading.text}
+                    </a>
+                  </li>
                 ))}
-                {article.blocks[order]
-                  ? blockElement(article.blocks[order])
-                  : null}
-              </Fragment>
-            ),
+              </ol>
+            </nav>
           )}
+          <div className="study-document__body">
+            <div className="study-document__meta">
+              <span>{new URL(article.url).hostname}</span>
+              <span>{article.blocks.length} 个内容块</span>
+            </div>
+            <h1 id="study-document-title">{article.title}</h1>
+            <a href={article.url} target="_blank" rel="noreferrer">
+              {article.url}
+            </a>
+            <div className="study-document__rule" aria-hidden="true" />
+            {Array.from(
+              { length: article.blocks.length + 1 },
+              (_, order) => (
+                <Fragment key={`flow-${order}`}>
+                  {(imagesByOrder.get(order) ?? []).map((image) => (
+                    <ArticleImageView
+                      key={image.id}
+                      image={image}
+                      picking={imagePickMode}
+                      onQuote={(nextImage, rect) =>
+                        void quoteImage(nextImage, rect)
+                      }
+                    />
+                  ))}
+                  {(tablesByOrder.get(order) ?? []).map((table) => (
+                    <TableView key={table.id} table={table} />
+                  ))}
+                  {(formulasByOrder.get(order) ?? []).map((formula) => (
+                    <FormulaView key={formula.id} formula={formula} />
+                  ))}
+                  {article.blocks[order] &&
+                  !(
+                    article.blocks[order]?.level === 1 &&
+                    article.blocks[order]?.text === article.title
+                  )
+                    ? blockElement(article.blocks[order])
+                    : null}
+                </Fragment>
+              ),
+            )}
+          </div>
         </article>
 
         {selectionAction && (
@@ -668,7 +868,22 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
               className={`study-message study-message--${message.role}`}
             >
               <span>{messageAuthor(message)}</span>
-              <p>{message.content}</p>
+              <p
+                aria-busy={
+                  streamingTarget?.id === message.id &&
+                  revealedCount < message.content.length
+                    ? true
+                    : undefined
+                }
+              >
+                {streamingTarget?.id === message.id
+                  ? message.content.slice(0, revealedCount)
+                  : message.content}
+                {streamingTarget?.id === message.id &&
+                  revealedCount < message.content.length && (
+                    <span className="study-stream-caret" aria-hidden="true" />
+                  )}
+              </p>
             </li>
           ))}
         </ol>

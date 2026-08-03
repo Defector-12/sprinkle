@@ -3,9 +3,12 @@ import type {
   ArticleBlockType,
   ArticleDiagnostics,
   ArticleDocument,
+  ArticleFormula,
   ArticleImage,
   ArticleRootKind,
+  ArticleTable,
 } from './types.ts';
+import { sanitizeMathMl } from './mathml.ts';
 
 export const MINIMUM_READABLE_LENGTH = 80;
 
@@ -54,6 +57,16 @@ function cleanText(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+function readableElementText(element: Element): string {
+  const clone = element.cloneNode(true) as Element;
+  for (const excluded of clone.querySelectorAll(
+    '.katex, math, script, style, [aria-hidden="true"]',
+  )) {
+    excluded.remove();
+  }
+  return cleanText(clone.textContent);
+}
+
 function blockTypeFor(element: Element): ArticleBlockType {
   const tagName = element.tagName.toLowerCase();
   if (/^h[1-6]$/.test(tagName)) return 'heading';
@@ -61,6 +74,21 @@ function blockTypeFor(element: Element): ArticleBlockType {
   if (tagName === 'blockquote') return 'quote';
   if (tagName === 'ul' || tagName === 'ol') return 'list';
   return 'paragraph';
+}
+
+function headingLevel(element: Element): number | undefined {
+  const match = /^h([1-6])$/i.exec(element.tagName);
+  return match?.[1] ? Number(match[1]) : undefined;
+}
+
+function isTableOfContentsList(element: Element): boolean {
+  if (!element.matches('ul, ol')) return false;
+  const links = [...element.querySelectorAll('a[href*="#"]')];
+  if (links.length < 3) return false;
+  return links.every((link) => {
+    const href = link.getAttribute('href') ?? '';
+    return href.includes('#') && cleanText(link.textContent).length > 0;
+  });
 }
 
 function hasDirectReadableText(element: Element): boolean {
@@ -231,17 +259,22 @@ function visualAlt(element: Element): string {
   );
 }
 
-function visualOrder(
-  visual: Element,
+function structureOrder(
+  target: Element,
   blockElements: Element[],
   blocks: ArticleBlock[],
   section: string,
 ): number {
   if (blockElements.length === blocks.length) {
+    const containingBlockIndex = blockElements.findIndex(
+      (element) => element === target || element.contains(target),
+    );
+    if (containingBlockIndex >= 0) return containingBlockIndex + 1;
+
     return blockElements.filter(
       (element) =>
         Boolean(
-          element.compareDocumentPosition(visual) &
+          element.compareDocumentPosition(target) &
             Node.DOCUMENT_POSITION_FOLLOWING,
         ),
     ).length;
@@ -251,6 +284,82 @@ function visualOrder(
     (block) => block.section === section,
   );
   return lastSectionIndex >= 0 ? lastSectionIndex + 1 : blocks.length;
+}
+
+function extractTables(
+  root: Element,
+  title: string,
+  blockElements: Element[],
+  blocks: ArticleBlock[],
+): ArticleTable[] {
+  const tables: ArticleTable[] = [];
+  for (const table of root.querySelectorAll('table')) {
+    if (table.closest(EXCLUDED_ANCESTORS)) continue;
+    const rows = [...table.querySelectorAll('tr')]
+      .map((row) => ({
+        cells: [...row.children]
+          .filter((cell) => cell.matches('th, td'))
+          .map((cell) => ({
+            text: readableElementText(cell),
+            header: cell.tagName.toLowerCase() === 'th',
+            colSpan: Math.max(
+              1,
+              Number.parseInt(cell.getAttribute('colspan') || '1', 10) || 1,
+            ),
+            rowSpan: Math.max(
+              1,
+              Number.parseInt(cell.getAttribute('rowspan') || '1', 10) || 1,
+            ),
+          }))
+          .filter((cell) => cell.text),
+      }))
+      .filter((row) => row.cells.length > 0);
+    if (!rows.length) continue;
+
+    const section = findSection(root, table, title);
+    tables.push({
+      id: `table-${tables.length + 1}`,
+      caption: cleanText(table.querySelector('caption')?.textContent),
+      section,
+      order: structureOrder(table, blockElements, blocks, section),
+      rows,
+    });
+  }
+  return tables;
+}
+
+function extractFormulas(
+  root: Element,
+  title: string,
+  blockElements: Element[],
+  blocks: ArticleBlock[],
+): ArticleFormula[] {
+  const formulas: ArticleFormula[] = [];
+  for (const math of root.querySelectorAll('math')) {
+    if (math.closest(EXCLUDED_ANCESTORS)) continue;
+    const mathml = sanitizeMathMl(math.outerHTML);
+    const tex = cleanText(
+      math.querySelector(
+        'annotation[encoding="application/x-tex"], annotation[encoding="text/tex"]',
+      )?.textContent,
+    );
+    if (!mathml && !tex) continue;
+
+    const section = findSection(root, math, title);
+    formulas.push({
+      id: `formula-${formulas.length + 1}`,
+      tex: tex || cleanText(math.textContent),
+      mathml,
+      section,
+      order: structureOrder(math, blockElements, blocks, section),
+      display:
+        math.getAttribute('display') === 'block' ||
+        Boolean(math.closest('.katex-display'))
+          ? 'block'
+          : 'inline',
+    });
+  }
+  return formulas;
 }
 
 export function extractArticle(
@@ -273,12 +382,15 @@ export function extractArticle(
   let emptyBlockCount = 0;
 
   for (const element of candidateBlocks) {
-    if (element.closest(EXCLUDED_ANCESTORS)) {
+    if (
+      element.closest(EXCLUDED_ANCESTORS) ||
+      isTableOfContentsList(element)
+    ) {
       excludedBlockCount += 1;
       continue;
     }
 
-    const text = cleanText(element.textContent);
+    const text = readableElementText(element);
     if (!text) {
       emptyBlockCount += 1;
       continue;
@@ -287,12 +399,14 @@ export function extractArticle(
     const type = blockTypeFor(element);
     if (type === 'heading') currentSection = text;
 
+    const level = headingLevel(element);
     blocks.push({
       id: `block-${blocks.length + 1}`,
       type,
       text,
       section: currentSection,
       order: blocks.length,
+      ...(level ? { level } : {}),
     });
     blockElements.push(element);
   }
@@ -337,9 +451,11 @@ export function extractArticle(
       caption: cleanText(figure?.querySelector('figcaption')?.textContent),
       section,
       surroundingText: nearbyText(visual),
-      order: visualOrder(visual, blockElements, blocks, section),
+      order: structureOrder(visual, blockElements, blocks, section),
     });
   }
+  const tables = extractTables(root, title, blockElements, blocks);
+  const formulas = extractFormulas(root, title, blockElements, blocks);
 
   const diagnostics: ArticleDiagnostics = {
     rootKind: rootSelection.kind,
@@ -371,6 +487,8 @@ export function extractArticle(
     url: pageUrl,
     blocks,
     images,
+    tables,
+    formulas,
     isPartial: readableLength < MINIMUM_READABLE_LENGTH,
     diagnostics,
   };

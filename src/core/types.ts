@@ -19,6 +19,7 @@ export interface ArticleBlock {
   text: string;
   section: string;
   order: number;
+  level?: number;
 }
 
 export interface ArticleImage {
@@ -29,6 +30,34 @@ export interface ArticleImage {
   section: string;
   surroundingText: string;
   order?: number;
+}
+
+export interface ArticleTableCell {
+  text: string;
+  header: boolean;
+  colSpan: number;
+  rowSpan: number;
+}
+
+export interface ArticleTableRow {
+  cells: ArticleTableCell[];
+}
+
+export interface ArticleTable {
+  id: string;
+  caption: string;
+  section: string;
+  order: number;
+  rows: ArticleTableRow[];
+}
+
+export interface ArticleFormula {
+  id: string;
+  tex: string;
+  mathml: string;
+  section: string;
+  order: number;
+  display: 'inline' | 'block';
 }
 
 export type ArticleRootKind = 'article' | 'main' | 'role-main' | 'body';
@@ -59,6 +88,8 @@ export interface ArticleDocument {
   url: string;
   blocks: ArticleBlock[];
   images: ArticleImage[];
+  tables?: ArticleTable[];
+  formulas?: ArticleFormula[];
   isPartial: boolean;
   diagnostics?: ArticleDiagnostics;
 }

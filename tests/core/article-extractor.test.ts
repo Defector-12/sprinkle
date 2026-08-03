@@ -92,6 +92,11 @@ describe('extractArticle', () => {
       <article>
         <h1>Kimi K3 architecture</h1>
         <p>${'Architecture overview. '.repeat(5)}</p>
+        <ul class="article-toc">
+          <li><a href="#key-numbers">Key Numbers</a></li>
+          <li><a href="#delta-rule">Delta Rule</a></li>
+          <li><a href="#conclusion">Conclusion</a></li>
+        </ul>
         <h2>Key Numbers</h2>
         <table>
           <caption>Model scale</caption>
@@ -108,10 +113,11 @@ describe('extractArticle', () => {
           The update is
           <span class="katex">
             <span class="katex-mathml">
-              <math display="block">
+              <math display="block" onclick="alert('xss')">
                 <semantics>
                   <mrow><mi>I</mi><mo>−</mo><msub><mi>β</mi><mi>t</mi></msub></mrow>
                   <annotation encoding="application/x-tex">I - \\beta_t</annotation>
+                  <script>alert('xss')</script>
                 </semantics>
               </math>
             </span>
@@ -166,8 +172,13 @@ describe('extractArticle', () => {
         display: 'block',
       }),
     ]);
+    expect(article.formulas?.[0]?.mathml).not.toContain('onclick');
+    expect(article.formulas?.[0]?.mathml).not.toContain('script');
     expect(article.blocks.map((block) => block.text).join(' ')).not.toContain(
       'visual fallback',
+    );
+    expect(article.blocks.map((block) => block.text).join(' ')).not.toContain(
+      'Conclusion',
     );
   });
 
