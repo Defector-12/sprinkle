@@ -9,6 +9,7 @@ import {
   retrieveRelevantChunks,
 } from '../src/core/retrieval.ts';
 import type {
+  AnswerModel,
   ArticleDocument,
   ChatMessage,
   FocusContext,
@@ -180,12 +181,14 @@ async function activatePage(tab: PageTab): Promise<PageContext> {
 function message(
   role: ChatMessage['role'],
   content: string,
+  answeredBy?: AnswerModel,
 ): ChatMessage {
   return {
     id: crypto.randomUUID(),
     role,
     content,
     createdAt: Date.now(),
+    ...(answeredBy ? { answeredBy } : {}),
   };
 }
 
@@ -243,7 +246,7 @@ async function askPage(
     );
     const completed = completeQuestionTurn(
       withQuestion,
-      message('assistant', answer),
+      message('assistant', answer.content, answer.model),
     );
     await contexts.save(completed);
     if (settings.retainConversations) {

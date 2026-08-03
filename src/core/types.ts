@@ -94,11 +94,14 @@ export interface RegionFocus {
 
 export type FocusContext = TextFocus | ImageFocus | RegionFocus;
 
+export type AnswerModel = 'deepseek' | 'doubao';
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   createdAt: number;
+  answeredBy?: AnswerModel;
   error?: boolean;
 }
 

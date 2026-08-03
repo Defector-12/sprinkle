@@ -293,6 +293,13 @@ function statusLabel(context: PageContext | null): string {
   }
 }
 
+function messageAuthor(message: PageContext['messages'][number]): string {
+  if (message.role === 'user') return '你';
+  if (message.answeredBy === 'deepseek') return 'DeepSeek';
+  if (message.answeredBy === 'doubao') return 'Doubao';
+  return '助手';
+}
+
 interface StatusPanelProps {
   context: PageContext | null;
   hasApiKey: boolean | null;
@@ -1094,7 +1101,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
                 className={`cr-message cr-message--${message.role}`}
                 key={message.id}
               >
-                <span>{message.role === 'user' ? '你' : '助手'}</span>
+                <span>{messageAuthor(message)}</span>
                 <p aria-busy={isStreaming || undefined}>
                   {shownText}
                   {isStreaming && (

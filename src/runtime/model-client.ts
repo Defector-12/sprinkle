@@ -1,4 +1,5 @@
 import type {
+  AnswerModel,
   ModelContentPart,
   ModelMessage,
   ModelRequest,
@@ -66,6 +67,11 @@ export interface ModelCompletionClient {
 export interface RoutedModelKeys {
   textApiKey: string;
   visionApiKey: string;
+}
+
+export interface RoutedModelResult {
+  content: string;
+  model: AnswerModel;
 }
 
 function assistantText(response: ProviderResponse): string | null {
@@ -295,11 +301,20 @@ export class RoutedModelClient {
   async complete(
     keys: RoutedModelKeys,
     request: ModelRequest,
-  ): Promise<string> {
+  ): Promise<RoutedModelResult> {
     if (requestContainsImage(request)) {
       validateApiKey(keys.visionApiKey, 'Doubao API Key');
-      return await this.visionClient.complete(keys.visionApiKey, request);
+      return {
+        content: await this.visionClient.complete(
+          keys.visionApiKey,
+          request,
+        ),
+        model: 'doubao',
+      };
     }
-    return await this.textClient.complete(keys.textApiKey, request);
+    return {
+      content: await this.textClient.complete(keys.textApiKey, request),
+      model: 'deepseek',
+    };
   }
 }

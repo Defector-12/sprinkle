@@ -44,6 +44,13 @@ function statusLabel(context: PageContext): string {
   }
 }
 
+function messageAuthor(message: PageContext['messages'][number]): string {
+  if (message.role === 'user') return '你';
+  if (message.answeredBy === 'deepseek') return 'DeepSeek';
+  if (message.answeredBy === 'doubao') return 'Doubao';
+  return '助手';
+}
+
 function EmptyState({
   busy,
   onActivate,
@@ -129,9 +136,7 @@ function MessageList({ context }: { context: PageContext }) {
           }`}
           key={message.id}
         >
-          <span className="message__role">
-            {message.role === 'user' ? '你' : '助手'}
-          </span>
+          <span className="message__role">{messageAuthor(message)}</span>
           <p>{message.content}</p>
         </li>
       ))}
