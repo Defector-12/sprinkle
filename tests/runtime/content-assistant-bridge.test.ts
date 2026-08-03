@@ -62,6 +62,29 @@ describe('ContentAssistantBridge', () => {
     });
   });
 
+  it('routes image tools, image-key status, and focus clearing through background', async () => {
+    sendMessage.mockResolvedValue({ ok: true, data: undefined });
+    const bridge = new ContentAssistantBridge();
+
+    await bridge.startImagePicker();
+    await bridge.startRegionPicker();
+    await bridge.hasVisionApiKey();
+    await bridge.clearFocus();
+
+    expect(sendMessage).toHaveBeenNthCalledWith(1, {
+      type: 'picker:image:start',
+    });
+    expect(sendMessage).toHaveBeenNthCalledWith(2, {
+      type: 'picker:region:start',
+    });
+    expect(sendMessage).toHaveBeenNthCalledWith(3, {
+      type: 'settings:has-vision-key',
+    });
+    expect(sendMessage).toHaveBeenNthCalledWith(4, {
+      type: 'focus:clear',
+    });
+  });
+
   it('surfaces a background failure when settings cannot open', async () => {
     sendMessage.mockResolvedValue({ ok: false, error: '无法打开设置' });
 

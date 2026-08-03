@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  ArkResponsesModelClient,
   ModelClientError,
   OpenAiCompatibleModelClient,
+  RoutedModelClient,
 } from '../../src/runtime/model-client.ts';
 import type { ModelRequest } from '../../src/core/types.ts';
 
@@ -222,6 +224,102 @@ describe('OpenAiCompatibleModelClient', () => {
 
     await expect(client.complete('key', request)).resolves.toBe(
       'First\nSecond',
+    );
+  });
+});
+
+describe('ArkResponsesModelClient', () => {
+  it('converts image messages to the Ark Responses API and reads output text', async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          output: [
+            {
+              type: 'message',
+              content: [
+                { type: 'output_text', text: 'The diagram shows an agent loop.' },
+              ],
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const client = new ArkResponsesModelClient(
+      {
+        endpoint: 'https://ark.cn-beijing.volces.com/api/v3/responses',
+        model: 'doubao-seed-2-0-mini-260428',
+      },
+      fetcher,
+    );
+
+    await expect(client.complete('ark-key', imageRequest)).resolves.toBe(
+      'The diagram shows an agent loop.',
+    );
+
+    const body = JSON.parse(fetcher.mock.calls[0]?.[1]?.body as string);
+    expect(body.model).toBe('doubao-seed-2-0-mini-260428');
+    expect(body.input.at(-1).content).toEqual([
+      {
+        type: 'input_image',
+        image_url: 'https://example.com/diagram.png',
+      },
+      {
+        type: 'input_text',
+        text: 'Explain this image.',
+      },
+    ]);
+  });
+});
+
+describe('RoutedModelClient', () => {
+  it('uses DeepSeek for text and Doubao only when the request contains an image', async () => {
+    const textClient = {
+      complete: vi.fn().mockResolvedValue('text answer'),
+    };
+    const visionClient = {
+      complete: vi.fn().mockResolvedValue('vision answer'),
+    };
+    const client = new RoutedModelClient(textClient, visionClient);
+
+    await expect(
+      client.complete(
+        { textApiKey: 'deepseek-key', visionApiKey: 'ark-key' },
+        request,
+      ),
+    ).resolves.toBe('text answer');
+    await expect(
+      client.complete(
+        { textApiKey: 'deepseek-key', visionApiKey: 'ark-key' },
+        imageRequest,
+      ),
+    ).resolves.toBe('vision answer');
+
+    expect(textClient.complete).toHaveBeenCalledOnce();
+    expect(textClient.complete).toHaveBeenCalledWith('deepseek-key', request);
+    expect(visionClient.complete).toHaveBeenCalledOnce();
+    expect(visionClient.complete).toHaveBeenCalledWith(
+      'ark-key',
+      imageRequest,
+    );
+  });
+
+  it('requires a separate Doubao key before sending an image', async () => {
+    const client = new RoutedModelClient(
+      { complete: vi.fn() },
+      { complete: vi.fn() },
+    );
+
+    await expect(
+      client.complete(
+        { textApiKey: 'deepseek-key', visionApiKey: '' },
+        imageRequest,
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: 'API_KEY_MISSING',
+        message: expect.stringContaining('Doubao API Key'),
+      }),
     );
   });
 });

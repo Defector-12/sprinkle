@@ -73,16 +73,27 @@ const partialContext: PageContext = {
   },
 };
 
+type VisionAssistantBridge = FloatingAssistantBridge & {
+  hasVisionApiKey(): Promise<boolean>;
+  startImagePicker(): Promise<void>;
+  startRegionPicker(): Promise<void>;
+  clearFocus(): Promise<PageContext>;
+};
+
 function createBridge(
   context: PageContext = readyContext,
-  overrides: Partial<FloatingAssistantBridge> = {},
-): FloatingAssistantBridge {
+  overrides: Partial<VisionAssistantBridge> = {},
+): VisionAssistantBridge {
   return {
     initialize: vi.fn().mockResolvedValue(context),
     activate: vi.fn().mockResolvedValue(readyContext),
     deactivate: vi.fn().mockResolvedValue(unactivatedContext),
     hasApiKey: vi.fn().mockResolvedValue(true),
+    hasVisionApiKey: vi.fn().mockResolvedValue(true),
     ask: vi.fn().mockResolvedValue(context),
+    startImagePicker: vi.fn().mockResolvedValue(undefined),
+    startRegionPicker: vi.fn().mockResolvedValue(undefined),
+    clearFocus: vi.fn().mockResolvedValue({ ...context, focus: null }),
     openSettings: vi.fn().mockResolvedValue(undefined),
     subscribe: vi.fn().mockReturnValue(() => undefined),
     ...overrides,
@@ -157,6 +168,56 @@ describe('FloatingAssistant', () => {
       await screen.findByRole('dialog', { name: 'Context Reader 对话' }),
     ).toBeVisible();
     expect(screen.getByText('Mixture of Experts')).toBeVisible();
+  });
+
+  it('offers accessible image and region tools from the floating conversation', async () => {
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: '点选页面图片' }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: '框选页面区域' }),
+    );
+
+    expect(bridge.startImagePicker).toHaveBeenCalledOnce();
+    expect(bridge.startRegionPicker).toHaveBeenCalledOnce();
+  });
+
+  it('previews an image reference, explains Doubao routing, and can remove it', async () => {
+    const imageContext: PageContext = {
+      ...readyContext,
+      focus: {
+        type: 'image',
+        imageUrl: 'data:image/png;base64,c2NyZWVuc2hvdA==',
+        alt: 'Agent memory architecture',
+        text: 'Agent memory architecture',
+        section: 'Architecture',
+        source: 'screenshot',
+      },
+    };
+    const bridge = createBridge(imageContext);
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+
+    expect(
+      screen.getByRole('img', { name: '已引用图片预览' }),
+    ).toHaveAttribute('src', imageContext.focus?.type === 'image'
+      ? imageContext.focus.imageUrl
+      : '');
+    expect(screen.getByText('含图片，发送时使用 Doubao')).toBeVisible();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '移除图片引用' }),
+    );
+    expect(bridge.clearFocus).toHaveBeenCalledOnce();
   });
 
   it('sends a question and renders the answer inside the same card', async () => {
