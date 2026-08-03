@@ -8,6 +8,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  Fragment,
   useEffect,
   useRef,
   useState,
@@ -48,6 +49,17 @@ interface RegionSelection {
   top: number;
   width: number;
   height: number;
+}
+
+interface TextQuote {
+  text: string;
+  section: string;
+}
+
+interface SelectionAction {
+  quote: TextQuote;
+  left: number;
+  top: number;
 }
 
 const MIN_READER_WIDTH = 30;
@@ -92,15 +104,33 @@ function blockElement(block: ArticleBlock) {
   }
 }
 
+function imageOrder(
+  image: ArticleImage,
+  blocks: ArticleBlock[],
+): number {
+  if (Number.isInteger(image.order)) {
+    return clamp(image.order as number, 0, blocks.length);
+  }
+  const sectionIndex = blocks.findLastIndex(
+    (block) => block.section === image.section,
+  );
+  return sectionIndex >= 0 ? sectionIndex + 1 : blocks.length;
+}
+
 function ArticleImageView({
   image,
+  picking,
   onQuote,
 }: {
   image: ArticleImage;
+  picking: boolean;
   onQuote: (image: ArticleImage, rect: DOMRect) => void;
 }) {
   return (
-    <figure data-section={image.section}>
+    <figure
+      className={picking ? 'study-figure study-figure--picking' : 'study-figure'}
+      data-section={image.section}
+    >
       <button
         type="button"
         aria-label={`引用图片：${image.alt || image.caption || '页面图片'}`}
@@ -159,10 +189,10 @@ function FocusPreview({
 export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
   const [context, setContext] = useState<PageContext | null>(null);
   const [readerWidth, setReaderWidth] = useState(56);
-  const [selectedQuote, setSelectedQuote] = useState<{
-    text: string;
-    section: string;
-  } | null>(null);
+  const [selectedQuote, setSelectedQuote] = useState<TextQuote | null>(null);
+  const [selectionAction, setSelectionAction] =
+    useState<SelectionAction | null>(null);
+  const [imagePickMode, setImagePickMode] = useState(false);
   const [question, setQuestion] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -220,23 +250,26 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     );
   }
 
-  async function quoteSelection() {
+  function quoteFromSelection(): TextQuote | null {
     const selection = window.getSelection();
     const text = selection?.toString().replace(/\s+/g, ' ').trim() ?? '';
-    const quote =
-      selection && text && !selection.isCollapsed
-        ? {
-            text,
-            section:
-              (selection.anchorNode?.nodeType === Node.ELEMENT_NODE
-                ? (selection.anchorNode as Element)
-                : selection.anchorNode?.parentElement
-              )?.closest<HTMLElement>('[data-section]')?.dataset.section ||
-              context?.article?.title ||
-              context?.title ||
-              '当前资料',
-          }
-        : selectedQuote;
+    if (!selection || !text || selection.isCollapsed) return null;
+    const element =
+      selection.anchorNode?.nodeType === Node.ELEMENT_NODE
+        ? (selection.anchorNode as Element)
+        : selection.anchorNode?.parentElement;
+    return {
+      text,
+      section:
+        element?.closest<HTMLElement>('[data-section]')?.dataset.section ||
+        context?.article?.title ||
+        context?.title ||
+        '当前资料',
+    };
+  }
+
+  async function quoteSelection(preferredQuote?: TextQuote | null) {
+    const quote = preferredQuote || quoteFromSelection() || selectedQuote;
     if (!quote) {
       setError('请先在左侧资料中选择一段文字。');
       return;
@@ -245,11 +278,13 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     setContext(
       await bridge.setTextFocus(quote.text.slice(0, 4_000), quote.section),
     );
+    setSelectionAction(null);
     inputRef.current?.focus();
   }
 
   async function quoteImage(image: ArticleImage, rect: DOMRect) {
     setBusy(true);
+    setImagePickMode(false);
     setError(null);
     try {
       const screenshot = await bridge.captureRegion({
@@ -360,6 +395,13 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
   const style = {
     '--reader-width': `${readerWidth}%`,
   } as CSSProperties;
+  const imagesByOrder = new Map<number, ArticleImage[]>();
+  for (const image of article.images) {
+    const order = imageOrder(image, article.blocks);
+    const images = imagesByOrder.get(order) ?? [];
+    images.push(image);
+    imagesByOrder.set(order, images);
+  }
 
   return (
     <main
@@ -368,7 +410,12 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
       data-testid="study-workspace"
       style={style}
     >
-      <section className="study-reader" aria-labelledby="study-document-title">
+      <section
+        className={`study-reader${
+          imagePickMode ? ' study-reader--image-picking' : ''
+        }`}
+        aria-labelledby="study-document-title"
+      >
         <header className="study-reader__bar">
           <div className="study-brand">
             <span className="study-brand-mark" aria-hidden="true">C</span>
@@ -381,6 +428,15 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
             <button type="button" onClick={() => void quoteSelection()}>
               <Quote size={16} aria-hidden="true" />
               <span>引用选中文字</span>
+            </button>
+            <button
+              type="button"
+              aria-label="点选资料图片"
+              aria-pressed={imagePickMode}
+              onClick={() => setImagePickMode((current) => !current)}
+            >
+              <ImageIcon size={16} aria-hidden="true" />
+              <span>点选图片</span>
             </button>
             <button type="button" onClick={() => setRegionMode(true)}>
               <Scan size={16} aria-hidden="true" />
@@ -396,20 +452,31 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
         <article
           ref={documentRef}
           className="study-document"
+          onScroll={() => setSelectionAction(null)}
           onMouseUp={() => {
+            const quote = quoteFromSelection();
+            if (!quote) {
+              setSelectionAction(null);
+              return;
+            }
+            setSelectedQuote(quote);
             const selection = window.getSelection();
-            const text =
-              selection?.toString().replace(/\s+/g, ' ').trim() ?? '';
-            if (!selection || selection.isCollapsed || !text) return;
-            const element =
-              selection.anchorNode?.nodeType === Node.ELEMENT_NODE
-                ? (selection.anchorNode as Element)
-                : selection.anchorNode?.parentElement;
-            setSelectedQuote({
-              text,
-              section:
-                element?.closest<HTMLElement>('[data-section]')?.dataset
-                  .section || article.title,
+            const rect =
+              selection && selection.rangeCount > 0
+                ? selection.getRangeAt(0).getBoundingClientRect()
+                : null;
+            setSelectionAction({
+              quote,
+              left: clamp(
+                (rect?.left ?? 24) + (rect?.width ?? 0) / 2,
+                54,
+                window.innerWidth - 54,
+              ),
+              top: clamp(
+                (rect?.bottom ?? 72) + 10,
+                70,
+                window.innerHeight - 54,
+              ),
             });
           }}
         >
@@ -422,22 +489,44 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
             {article.url}
           </a>
           <div className="study-document__rule" aria-hidden="true" />
-          {article.blocks.map(blockElement)}
-          {article.images.length > 0 && (
-            <section className="study-figures" aria-labelledby="study-figures-title">
-              <h2 id="study-figures-title">文中图片</h2>
-              {article.images.map((image) => (
-                <ArticleImageView
-                  key={image.id}
-                  image={image}
-                  onQuote={(nextImage, rect) =>
-                    void quoteImage(nextImage, rect)
-                  }
-                />
-              ))}
-            </section>
+          {Array.from(
+            { length: article.blocks.length + 1 },
+            (_, order) => (
+              <Fragment key={`flow-${order}`}>
+                {(imagesByOrder.get(order) ?? []).map((image) => (
+                  <ArticleImageView
+                    key={image.id}
+                    image={image}
+                    picking={imagePickMode}
+                    onQuote={(nextImage, rect) =>
+                      void quoteImage(nextImage, rect)
+                    }
+                  />
+                ))}
+                {article.blocks[order]
+                  ? blockElement(article.blocks[order])
+                  : null}
+              </Fragment>
+            ),
           )}
         </article>
+
+        {selectionAction && (
+          <button
+            className="study-selection-action"
+            type="button"
+            aria-label="提问选中文字"
+            style={{
+              left: selectionAction.left,
+              top: selectionAction.top,
+            }}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => void quoteSelection(selectionAction.quote)}
+          >
+            <Quote size={14} aria-hidden="true" />
+            提问
+          </button>
+        )}
 
         {regionMode && (
           <div

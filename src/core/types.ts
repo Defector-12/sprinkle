@@ -28,6 +28,7 @@ export interface ArticleImage {
   caption: string;
   section: string;
   surroundingText: string;
+  order?: number;
 }
 
 export type ArticleRootKind = 'article' | 'main' | 'role-main' | 'body';

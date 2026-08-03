@@ -42,6 +42,13 @@ const CUSTOM_CONTENT_ROOT_SELECTOR = [
 ].join(',');
 
 const CUSTOM_TEXT_ELEMENT_SELECTOR = 'div, span';
+const VISUAL_SELECTOR = [
+  'img',
+  'canvas',
+  'figure svg',
+  'svg[role="img"]',
+  'svg[aria-label]',
+].join(',');
 
 function cleanText(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, ' ').trim();
@@ -173,6 +180,79 @@ function resolveImageUrl(source: string, pageUrl: string): string {
   }
 }
 
+function srcsetSource(value: string | null): string {
+  const candidates = (value ?? '')
+    .split(',')
+    .map((candidate) => candidate.trim().split(/\s+/)[0])
+    .filter((candidate): candidate is string => Boolean(candidate));
+  return candidates.at(-1) ?? '';
+}
+
+function visualSource(element: Element, pageUrl: string): string {
+  if (element instanceof HTMLImageElement) {
+    const source =
+      element.getAttribute('data-src') ||
+      element.getAttribute('data-original') ||
+      element.getAttribute('data-lazy-src') ||
+      element.currentSrc ||
+      element.getAttribute('src') ||
+      srcsetSource(
+        element.getAttribute('data-srcset') ||
+          element.getAttribute('srcset'),
+      );
+    return source ? resolveImageUrl(source, pageUrl) : '';
+  }
+
+  if (element instanceof HTMLCanvasElement) {
+    try {
+      return element.toDataURL('image/png');
+    } catch {
+      return '';
+    }
+  }
+
+  if (element.tagName.toLowerCase() === 'svg') {
+    const clone = element.cloneNode(true) as Element;
+    if (!clone.hasAttribute('xmlns')) {
+      clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    }
+    const serialized = new XMLSerializer().serializeToString(clone);
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serialized)}`;
+  }
+
+  return '';
+}
+
+function visualAlt(element: Element): string {
+  return cleanText(
+    element.getAttribute('alt') ||
+      element.getAttribute('aria-label') ||
+      element.querySelector('title')?.textContent,
+  );
+}
+
+function visualOrder(
+  visual: Element,
+  blockElements: Element[],
+  blocks: ArticleBlock[],
+  section: string,
+): number {
+  if (blockElements.length === blocks.length) {
+    return blockElements.filter(
+      (element) =>
+        Boolean(
+          element.compareDocumentPosition(visual) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+    ).length;
+  }
+
+  const lastSectionIndex = blocks.findLastIndex(
+    (block) => block.section === section,
+  );
+  return lastSectionIndex >= 0 ? lastSectionIndex + 1 : blocks.length;
+}
+
 export function extractArticle(
   source: Document,
   pageUrl: string,
@@ -187,6 +267,7 @@ export function extractArticle(
 
   let currentSection = title;
   const blocks: ArticleBlock[] = [];
+  const blockElements: Element[] = [];
   const candidateBlocks = root.querySelectorAll(CONTENT_SELECTOR);
   let excludedBlockCount = 0;
   let emptyBlockCount = 0;
@@ -213,32 +294,7 @@ export function extractArticle(
       section: currentSection,
       order: blocks.length,
     });
-  }
-
-  const seenImages = new Set<string>();
-  const images: ArticleImage[] = [];
-
-  for (const image of root.querySelectorAll('img')) {
-    const rawSource =
-      (image as HTMLImageElement).currentSrc ||
-      image.getAttribute('src') ||
-      image.getAttribute('data-src') ||
-      '';
-    if (!rawSource) continue;
-
-    const src = resolveImageUrl(rawSource, pageUrl);
-    if (seenImages.has(src)) continue;
-    seenImages.add(src);
-
-    const figure = image.closest('figure');
-    images.push({
-      id: `image-${images.length + 1}`,
-      src,
-      alt: cleanText(image.getAttribute('alt')),
-      caption: cleanText(figure?.querySelector('figcaption')?.textContent),
-      section: findSection(root, image, title),
-      surroundingText: nearbyText(image),
-    });
+    blockElements.push(element);
   }
 
   let readableLength = blocks.reduce(
@@ -256,10 +312,33 @@ export function extractArticle(
     );
     if (recoveredLength > readableLength) {
       blocks.splice(0, blocks.length, ...recoveredBlocks);
+      blockElements.splice(0, blockElements.length);
       readableLength = recoveredLength;
       fallbackUsed = true;
       fallbackBlockCount = recoveredBlocks.length;
     }
+  }
+
+  const seenImages = new Set<string>();
+  const images: ArticleImage[] = [];
+
+  for (const visual of root.querySelectorAll(VISUAL_SELECTOR)) {
+    if (visual.closest(EXCLUDED_ANCESTORS)) continue;
+    const src = visualSource(visual, pageUrl);
+    if (!src || seenImages.has(src)) continue;
+    seenImages.add(src);
+
+    const figure = visual.closest('figure');
+    const section = findSection(root, visual, title);
+    images.push({
+      id: `image-${images.length + 1}`,
+      src,
+      alt: visualAlt(visual),
+      caption: cleanText(figure?.querySelector('figcaption')?.textContent),
+      section,
+      surroundingText: nearbyText(visual),
+      order: visualOrder(visual, blockElements, blocks, section),
+    });
   }
 
   const diagnostics: ArticleDiagnostics = {

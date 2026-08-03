@@ -158,6 +158,12 @@ textarea:focus-visible,
   color: var(--study-ink);
 }
 
+.study-reader__tools button[aria-pressed="true"] {
+  border-color: var(--study-accent);
+  background: var(--study-accent-soft);
+  color: var(--study-accent-dark);
+}
+
 .study-document {
   min-height: 0;
   overflow-y: auto;
@@ -205,8 +211,7 @@ textarea:focus-visible,
   background: var(--study-accent);
 }
 
-.study-document > h2,
-.study-figures > h2 {
+.study-document > h2 {
   margin: 56px 0 18px;
   font-family: "Iowan Old Style", "Palatino Linotype", serif;
   font-size: 30px;
@@ -256,16 +261,11 @@ textarea:focus-visible,
   font: 13px/1.75 "SFMono-Regular", Consolas, monospace;
 }
 
-.study-figures {
-  margin-top: 64px;
-  border-top: 1px solid var(--study-line);
+.study-figure {
+  margin: 30px 0 42px;
 }
 
-.study-figures figure {
-  margin: 26px 0 54px;
-}
-
-.study-figures figure > button {
+.study-figure > button {
   position: relative;
   display: block;
   width: 100%;
@@ -277,14 +277,14 @@ textarea:focus-visible,
   cursor: pointer;
 }
 
-.study-figures img {
+.study-figure img {
   display: block;
   width: 100%;
   max-height: 620px;
   object-fit: contain;
 }
 
-.study-figures figure button span {
+.study-figure button span {
   position: absolute;
   right: 12px;
   bottom: 12px;
@@ -304,13 +304,20 @@ textarea:focus-visible,
     transform 140ms ease;
 }
 
-.study-figures figure button:hover span,
-.study-figures figure button:focus-visible span {
+.study-figure button:hover span,
+.study-figure button:focus-visible span,
+.study-figure--picking button span {
   opacity: 1;
   transform: none;
 }
 
-.study-figures figcaption {
+.study-figure--picking > button {
+  border-color: var(--study-accent);
+  box-shadow: 0 0 0 3px var(--study-accent-soft);
+  cursor: crosshair;
+}
+
+.study-figure figcaption {
   margin-top: 10px;
   color: var(--study-muted);
   font-family: "Iowan Old Style", "Songti SC", serif;
@@ -438,6 +445,8 @@ textarea:focus-visible,
 }
 
 .study-message--user {
+  width: fit-content;
+  max-width: min(78%, 520px);
   margin-left: auto;
 }
 
@@ -446,10 +455,11 @@ textarea:focus-visible,
 }
 
 .study-message--user > p {
-  border-radius: 16px 3px 16px 16px;
+  border-radius: 14px 3px 14px 14px;
   background: var(--study-ink);
   color: var(--study-paper);
-  padding: 12px 15px;
+  padding: 10px 14px;
+  overflow-wrap: anywhere;
 }
 
 .study-message--assistant {
@@ -596,6 +606,30 @@ textarea:focus-visible,
   border-radius: 50%;
   background: transparent;
   cursor: pointer;
+}
+
+.study-selection-action {
+  position: fixed;
+  z-index: 40;
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--study-ink);
+  border-radius: 999px;
+  background: var(--study-ink);
+  box-shadow: 0 10px 28px oklch(20% 0.02 67 / 22%);
+  color: var(--study-paper);
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+.study-selection-action:hover {
+  border-color: var(--study-accent-dark);
+  background: var(--study-accent-dark);
 }
 
 .study-region-picker {

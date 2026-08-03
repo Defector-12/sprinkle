@@ -67,9 +67,9 @@ Floating Assistant
 
 - 是 WXT 未列出 HTML 入口 `study.html`，由悬浮窗显式打开为独立标签页。
 - 通过不可变的 `tabId + URL` 读取和更新原页面上下文，不依赖当前活动标签页。
-- 左侧根据 `ArticleDocument` 重建语义化阅读视图，避免外站 `X-Frame-Options` 和 CSP 阻止 iframe。
+- 左侧根据 `ArticleDocument` 重建语义化阅读视图，并按提取顺序回填图片和图表，避免外站 `X-Frame-Options` 和 CSP 阻止 iframe。
 - 右侧复用后台问答编排、DeepSeek/Doubao 路由、模型标签和消息归档。
-- 划词和点图直接构造 `FocusContext`；区域引用先截取当前工作台可见区域，再写入临时上下文。
+- 划词后在选区附近提供快捷提问；点图模式直接构造 `FocusContext`；区域引用先截取当前工作台可见区域，再写入临时上下文。
 - 原标签页关闭后其 session 上下文被清除，工作台下次操作时明确提示上下文失效。
 
 ## 3. 页面身份与生命周期
@@ -124,6 +124,9 @@ article -> main -> [role="main"] -> body
 - `pre`
 - `blockquote`
 - `ul` / `ol`
+- `img`、语义化 SVG 图表和 Canvas 图表
+
+媒体项记录其前方已接受正文块数量，工作台据此将图片和图表穿插回原文位置。没有位置字段的旧会话按所属章节末尾回退显示。
 
 当上述语义节点不足 80 个字符时，执行安全回退：
 
