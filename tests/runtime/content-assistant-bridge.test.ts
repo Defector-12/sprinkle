@@ -35,6 +35,14 @@ describe('ContentAssistantBridge', () => {
     expect(openOptionsPage).not.toHaveBeenCalled();
   });
 
+  it('opens the study workspace through the source-page background context', async () => {
+    sendMessage.mockResolvedValue({ ok: true, data: undefined });
+
+    await new ContentAssistantBridge().openStudy();
+
+    expect(sendMessage).toHaveBeenCalledWith({ type: 'study:open' });
+  });
+
   it('loads dormant context without starting page extraction', async () => {
     sendMessage.mockResolvedValue({ ok: true, data: undefined });
 

@@ -78,6 +78,7 @@ type VisionAssistantBridge = FloatingAssistantBridge & {
   startImagePicker(): Promise<void>;
   startRegionPicker(): Promise<void>;
   clearFocus(): Promise<PageContext>;
+  openStudy(): Promise<void>;
 };
 
 function createBridge(
@@ -94,6 +95,7 @@ function createBridge(
     startImagePicker: vi.fn().mockResolvedValue(undefined),
     startRegionPicker: vi.fn().mockResolvedValue(undefined),
     clearFocus: vi.fn().mockResolvedValue({ ...context, focus: null }),
+    openStudy: vi.fn().mockResolvedValue(undefined),
     openSettings: vi.fn().mockResolvedValue(undefined),
     subscribe: vi.fn().mockReturnValue(() => undefined),
     ...overrides,
@@ -143,6 +145,20 @@ describe('FloatingAssistant', () => {
     expect(
       screen.queryByRole('dialog', { name: 'Context Reader 对话' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('opens the full-page study workspace from the conversation header', async () => {
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: '打开学习工作台' }),
+    );
+
+    expect(bridge.openStudy).toHaveBeenCalledOnce();
   });
 
   it('opens from a selection event and shows the selected text as context', async () => {
