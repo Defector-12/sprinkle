@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { extractArticle } from '../../src/core/article-extractor.ts';
 
@@ -41,9 +41,50 @@ describe('extractArticle', () => {
         alt: 'Reader architecture',
         caption: 'Content script to model request flow',
         section: 'Retrieval',
+        order: 5,
       }),
     ]);
     expect(article.isPartial).toBe(false);
+  });
+
+  it('extracts inline SVG and canvas charts with their document positions', () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(
+      'data:image/png;base64,chart',
+    );
+    document.body.innerHTML = `
+      <article>
+        <h1>Benchmark report</h1>
+        <p>${'Introduction to the benchmark. '.repeat(4)}</p>
+        <figure>
+          <svg role="img" aria-label="Accuracy by model" viewBox="0 0 400 200">
+            <rect width="120" height="80"></rect>
+          </svg>
+          <figcaption>Figure 1: Accuracy comparison</figcaption>
+        </figure>
+        <h2>Latency</h2>
+        <canvas aria-label="Latency by model" width="400" height="200"></canvas>
+        <p>${'Latency results and analysis. '.repeat(4)}</p>
+      </article>
+    `;
+
+    const article = extractArticle(
+      document,
+      'https://example.com/benchmark',
+    );
+
+    expect(article.images).toEqual([
+      expect.objectContaining({
+        alt: 'Accuracy by model',
+        caption: 'Figure 1: Accuracy comparison',
+        order: 2,
+        src: expect.stringContaining('data:image/svg+xml'),
+      }),
+      expect.objectContaining({
+        alt: 'Latency by model',
+        order: 3,
+        src: 'data:image/png;base64,chart',
+      }),
+    ]);
   });
 
   it('marks pages with very little readable content as partial', () => {

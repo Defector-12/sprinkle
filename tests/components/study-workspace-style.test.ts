@@ -15,4 +15,16 @@ describe('study workspace visual surface', () => {
     expect(studyCss).not.toMatch(/linear-gradient/);
     expect(studyCss).not.toMatch(/background-size/);
   });
+
+  it('keeps short user messages compact instead of stretching across the pane', () => {
+    const studyCss = readFileSync(
+      new URL('../../src/styles/study.css', import.meta.url),
+      'utf8',
+    );
+    const userMessageRule =
+      studyCss.match(/\.study-message--user\s*\{([\s\S]*?)\}/)?.[1] ?? '';
+
+    expect(userMessageRule).toContain('width: fit-content');
+    expect(userMessageRule).toMatch(/max-width:\s*min\(/);
+  });
 });

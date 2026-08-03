@@ -49,6 +49,7 @@ const readyContext: PageContext = {
         caption: 'Figure 1',
         section: 'Architecture',
         surroundingText: 'Working memory flow',
+        order: 2,
       },
     ],
     isPartial: false,
@@ -100,10 +101,74 @@ describe('StudyWorkspace', () => {
     expect(
       screen.getByRole('img', { name: 'Agent memory architecture' }),
     ).toBeVisible();
+    const diagram = screen.getByRole('img', {
+      name: 'Agent memory architecture',
+    });
+    const code = screen.getByText('memory.update(observation)');
+    expect(
+      diagram.compareDocumentPosition(code) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(screen.getByText('DeepSeek')).toBeVisible();
     expect(
       screen.getByRole('textbox', { name: '向当前资料提问' }),
     ).toBeVisible();
+  });
+
+  it('offers a nearby ask action immediately after selecting text', async () => {
+    const bridge = createBridge();
+    render(<StudyWorkspace bridge={bridge} />);
+    const paragraph = await screen.findByText(
+      'Working memory carries the current reasoning state.',
+    );
+    vi.spyOn(window, 'getSelection').mockReturnValue({
+      isCollapsed: false,
+      toString: () => 'Working memory',
+      anchorNode: paragraph.firstChild,
+      rangeCount: 1,
+      getRangeAt: () => ({
+        getBoundingClientRect: () => ({
+          left: 180,
+          top: 220,
+          right: 310,
+          bottom: 244,
+          width: 130,
+          height: 24,
+          x: 180,
+          y: 220,
+          toJSON: () => undefined,
+        }),
+      }),
+    } as unknown as Selection);
+
+    fireEvent.mouseUp(paragraph);
+    await userEvent.click(
+      await screen.findByRole('button', { name: '提问选中文字' }),
+    );
+
+    expect(bridge.setTextFocus).toHaveBeenCalledWith(
+      'Working memory',
+      'Architecture',
+    );
+  });
+
+  it('provides an explicit point-image mode in the reader toolbar', async () => {
+    const bridge = createBridge();
+    render(<StudyWorkspace bridge={bridge} />);
+    const picker = await screen.findByRole('button', {
+      name: '点选资料图片',
+    });
+
+    await userEvent.click(picker);
+    expect(picker).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: '引用图片：Agent memory architecture',
+      }),
+    );
+
+    expect(bridge.setImageFocus).toHaveBeenCalled();
+    expect(picker).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('resizes both panes with pointer drag and keyboard arrows', async () => {
