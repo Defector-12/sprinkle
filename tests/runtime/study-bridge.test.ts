@@ -13,7 +13,7 @@ vi.mock('wxt/browser', () => ({
   browser: {
     runtime: {
       sendMessage,
-      getURL: vi.fn((path: string) => `chrome-extension://id/${path}`),
+      getURL: vi.fn((path: string) => `chrome-extension://id${path}`),
       onMessage: { addListener, removeListener },
     },
     tabs: {
@@ -74,9 +74,8 @@ describe('StudyWorkspaceBridge', () => {
     await bridge.open();
 
     expect(createTab).toHaveBeenCalledWith({
-      url: expect.stringContaining(
-        'study.html?tabId=7&url=https%3A%2F%2Fexample.com%2Fpaper%3Flang%3Dzh',
-      ),
+      url:
+        'chrome-extension://id/study.html?tabId=7&url=https%3A%2F%2Fexample.com%2Fpaper%3Flang%3Dzh',
     });
   });
 });

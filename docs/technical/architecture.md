@@ -27,6 +27,14 @@ Browser Action
                       -> storage.session: PageContext
                       -> storage.local: Settings / optional messages
                       -> Model API
+
+Floating Assistant
+  -> runtime message("study:open")
+       -> Background opens study.html?tabId&url
+            -> Study Workspace (React)
+                 -> structured article reader
+                 -> resizable split panes
+                 -> targeted context / focus / chat messages
 ```
 
 ### Floating Assistant
@@ -54,6 +62,15 @@ Browser Action
 - 从 Content Script 获取页面结构与选择结果。
 - 从扩展本地存储读取 API Key，并直接请求模型。
 - 监听标签页关闭事件并清除对应临时上下文。
+
+### Study Workspace
+
+- 是 WXT 未列出 HTML 入口 `study.html`，由悬浮窗显式打开为独立标签页。
+- 通过不可变的 `tabId + URL` 读取和更新原页面上下文，不依赖当前活动标签页。
+- 左侧根据 `ArticleDocument` 重建语义化阅读视图，避免外站 `X-Frame-Options` 和 CSP 阻止 iframe。
+- 右侧复用后台问答编排、DeepSeek/Doubao 路由、模型标签和消息归档。
+- 划词和点图直接构造 `FocusContext`；区域引用先截取当前工作台可见区域，再写入临时上下文。
+- 原标签页关闭后其 session 上下文被清除，工作台下次操作时明确提示上下文失效。
 
 ## 3. 页面身份与生命周期
 
@@ -135,6 +152,8 @@ article -> main -> [role="main"] -> body
 - 页面是否仍存在加载态标记。
 
 `PARTIAL` 状态提供三级排查入口：对话页轻量入口、诊断概览、单项原因详情。诊断页可以返回对话或显式重新理解页面，不会自动发送模型请求。
+
+工作台不复制原网页 DOM，也不执行原网页脚本。它只渲染提取后的标题、正文块、代码块和图片，因此跨站稳定，但动态表格、Canvas 和站点交互不会完整还原。
 
 ## 5. 检索与模型请求
 
@@ -227,5 +246,6 @@ VITE_VISION_MODEL_ID
 - Core：URL、解析、检索、上下文状态和模型请求单元测试。
 - Runtime：session/local 存储与模型错误边界测试。
 - UI：休眠默认态、显式启用、状态面板、选词展开、窗口缩放、浏览器缩放回收、发送问题、Esc 收起和设置保存组件测试。
+- Workbench：目标上下文隔离、双栏调整、文章渲染、划词/点图/框选引用和连续追问组件测试。
 - Build：Chrome MV3 和 Edge MV3 双构建。
 - Manual：解压扩展加载、休眠页面不读取、工具栏显式启动、状态切换、选中文字、窗口缩放与悬浮卡片问答。

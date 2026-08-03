@@ -127,10 +127,30 @@ describe('StudyWorkspace', () => {
       toJSON: () => undefined,
     });
 
-    fireEvent.pointerDown(divider, { pointerId: 1, clientX: 560 });
-    fireEvent.pointerMove(divider, { pointerId: 1, clientX: 700 });
-    fireEvent.pointerUp(divider, { pointerId: 1, clientX: 700 });
-    expect(workspace).toHaveStyle({ '--reader-width': '70%' });
+    fireEvent(
+      divider,
+      new MouseEvent('pointerdown', {
+        bubbles: true,
+        clientX: 560,
+      }),
+    );
+    fireEvent(
+      divider,
+      new MouseEvent('pointermove', {
+        bubbles: true,
+        clientX: 700,
+      }),
+    );
+    fireEvent(
+      divider,
+      new MouseEvent('pointerup', {
+        bubbles: true,
+        clientX: 700,
+      }),
+    );
+    await waitFor(() =>
+      expect(workspace).toHaveStyle({ '--reader-width': '70%' }),
+    );
 
     divider.focus();
     await userEvent.keyboard('{ArrowLeft}');
@@ -164,7 +184,8 @@ describe('StudyWorkspace', () => {
     );
     expect(bridge.setImageFocus).toHaveBeenCalledWith(
       expect.objectContaining({
-        imageUrl: 'https://example.com/diagram.png',
+        imageUrl: 'data:image/jpeg;base64,selected-region',
+        source: 'screenshot',
       }),
     );
 
@@ -175,21 +196,30 @@ describe('StudyWorkspace', () => {
       screen.getByRole('dialog', { name: '框选资料区域' }),
     ).toBeVisible();
     const regionPicker = screen.getByTestId('study-region-picker');
-    fireEvent.pointerDown(regionPicker, {
-      pointerId: 2,
-      clientX: 20,
-      clientY: 30,
-    });
-    fireEvent.pointerMove(regionPicker, {
-      pointerId: 2,
-      clientX: 220,
-      clientY: 180,
-    });
-    fireEvent.pointerUp(regionPicker, {
-      pointerId: 2,
-      clientX: 220,
-      clientY: 180,
-    });
+    fireEvent(
+      regionPicker,
+      new MouseEvent('pointerdown', {
+        bubbles: true,
+        clientX: 20,
+        clientY: 30,
+      }),
+    );
+    fireEvent(
+      regionPicker,
+      new MouseEvent('pointermove', {
+        bubbles: true,
+        clientX: 220,
+        clientY: 180,
+      }),
+    );
+    fireEvent(
+      regionPicker,
+      new MouseEvent('pointerup', {
+        bubbles: true,
+        clientX: 220,
+        clientY: 180,
+      }),
+    );
 
     await waitFor(() =>
       expect(bridge.setRegionFocus).toHaveBeenCalledWith(

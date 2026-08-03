@@ -19,6 +19,7 @@ import {
   ConversationArchive,
   SessionContextRepository,
 } from '../src/runtime/context-repository.ts';
+import { extensionUrl } from '../src/runtime/extension-url.ts';
 import type {
   ContentRequest,
   ExtensionRequest,
@@ -319,6 +320,44 @@ async function clearFocus(tab: PageTab): Promise<PageContext> {
   return updated;
 }
 
+async function studyContext(
+  tabId: number,
+  url: string,
+): Promise<PageContext> {
+  const context = await contexts.get(tabId, url);
+  if (!context?.article || !['ready', 'partial', 'answering'].includes(context.status)) {
+    throw new Error('原页面上下文已失效，请返回原页面重新打开学习工作台。');
+  }
+  return context;
+}
+
+async function setStudyFocus(
+  tabId: number,
+  url: string,
+  focus: FocusContext | null,
+): Promise<PageContext> {
+  const current = await studyContext(tabId, url);
+  const updated: PageContext = {
+    ...current,
+    focus,
+    updatedAt: Date.now(),
+  };
+  await contexts.save(updated);
+  await notify(updated);
+  return updated;
+}
+
+async function openStudy(tab: PageTab): Promise<void> {
+  await studyContext(tab.id, tab.url);
+  const params = new URLSearchParams({
+    tabId: String(tab.id),
+    url: tab.url,
+  });
+  await browser.tabs.create({
+    url: extensionUrl(`/study.html?${params.toString()}`),
+  });
+}
+
 async function handleRequest(
   request: ExtensionRequest,
   sender: Browser.runtime.MessageSender,
@@ -336,6 +375,41 @@ async function handleRequest(
         return success(
           await askPage(request.question, await requestTab(sender)),
         );
+      case 'study:open':
+        await openStudy(await requestTab(sender));
+        return success(undefined);
+      case 'study:context:get':
+        return success(await studyContext(request.tabId, request.url));
+      case 'study:chat:ask':
+        return success(
+          await askPage(request.question, {
+            id: request.tabId,
+            url: request.url,
+            title: (await studyContext(request.tabId, request.url)).title,
+            windowId: sender.tab?.windowId ?? 0,
+          }),
+        );
+      case 'study:focus:set':
+        return success(
+          await setStudyFocus(request.tabId, request.url, request.focus),
+        );
+      case 'study:focus:clear':
+        return success(
+          await setStudyFocus(request.tabId, request.url, null),
+        );
+      case 'study:source:open':
+        await studyContext(request.tabId, request.url);
+        {
+          const sourceTab = await browser.tabs.update(request.tabId, {
+            active: true,
+          });
+          if (sourceTab?.windowId != null) {
+            await browser.windows.update(sourceTab.windowId, {
+              focused: true,
+            });
+          }
+        }
+        return success(undefined);
       case 'picker:image:start':
         await startPicker('picker:image:start', await requestTab(sender));
         return success(undefined);

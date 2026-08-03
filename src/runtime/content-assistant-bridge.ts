@@ -54,6 +54,10 @@ export class ContentAssistantBridge implements FloatingAssistantBridge {
     return send<PageContext>({ type: 'focus:clear' });
   }
 
+  async openStudy(): Promise<void> {
+    await send<void>({ type: 'study:open' });
+  }
+
   async openSettings(): Promise<void> {
     await send<void>({ type: 'settings:open' });
   }

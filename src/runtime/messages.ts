@@ -4,11 +4,34 @@ import type {
   PageContext,
 } from '../core/types.ts';
 
+export interface StudyCaptureRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 export type ExtensionRequest =
   | { type: 'context:get' }
   | { type: 'context:activate' }
   | { type: 'context:clear' }
   | { type: 'chat:ask'; question: string }
+  | { type: 'study:open' }
+  | { type: 'study:context:get'; tabId: number; url: string }
+  | {
+      type: 'study:chat:ask';
+      tabId: number;
+      url: string;
+      question: string;
+    }
+  | {
+      type: 'study:focus:set';
+      tabId: number;
+      url: string;
+      focus: FocusContext;
+    }
+  | { type: 'study:focus:clear'; tabId: number; url: string }
+  | { type: 'study:source:open'; tabId: number; url: string }
   | { type: 'picker:image:start' }
   | { type: 'picker:region:start' }
   | { type: 'focus:set'; focus: FocusContext }

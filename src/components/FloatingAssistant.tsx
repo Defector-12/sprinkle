@@ -4,6 +4,7 @@ import {
   KeyRound,
   LoaderCircle,
   MessageCircle,
+  PanelsTopLeft,
   Power,
   RefreshCw,
   Scan,
@@ -41,6 +42,7 @@ export interface FloatingAssistantBridge {
   startImagePicker(): Promise<void>;
   startRegionPicker(): Promise<void>;
   clearFocus(): Promise<PageContext>;
+  openStudy(): Promise<void>;
   openSettings(): Promise<void>;
   subscribe(listener: (context: PageContext) => void): () => void;
 }
@@ -994,6 +996,15 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           </div>
         </div>
         <div className="cr-header__actions">
+          <button
+            className="cr-icon-button"
+            type="button"
+            aria-label="打开学习工作台"
+            title="打开全页学习工作台"
+            onClick={() => void bridge.openStudy()}
+          >
+            <PanelsTopLeft size={17} aria-hidden="true" />
+          </button>
           <button
             className="cr-icon-button"
             type="button"
