@@ -181,6 +181,9 @@ describe('FloatingAssistant', () => {
       screen.getByRole('button', { name: '点选页面图片' }),
     );
     await userEvent.click(
+      screen.getByRole('button', { name: '打开 Context Reader' }),
+    );
+    await userEvent.click(
       screen.getByRole('button', { name: '框选页面区域' }),
     );
 

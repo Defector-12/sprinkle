@@ -12,8 +12,10 @@ export type ExtensionRequest =
   | { type: 'picker:image:start' }
   | { type: 'picker:region:start' }
   | { type: 'focus:set'; focus: FocusContext }
+  | { type: 'focus:clear' }
   | { type: 'capture:visible' }
   | { type: 'settings:has-key' }
+  | { type: 'settings:has-vision-key' }
   | { type: 'settings:open' };
 
 export type ContentRequest =

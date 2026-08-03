@@ -16,12 +16,14 @@ export interface SettingsAppProps {
 
 const DEFAULT_SETTINGS: UserSettings = {
   apiKey: '',
+  visionApiKey: '',
   retainConversations: false,
 };
 
 export function SettingsApp({ store }: SettingsAppProps) {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [showKey, setShowKey] = useState(false);
+  const [showVisionKey, setShowVisionKey] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
@@ -92,41 +94,88 @@ export function SettingsApp({ store }: SettingsAppProps) {
             </div>
           </div>
 
-          <div className="field">
-            <label htmlFor="api-key">API Key</label>
-            <div className="input-frame">
-              <KeyRound size={18} aria-hidden="true" />
-              <input
-                id="api-key"
-                type={showKey ? 'text' : 'password'}
-                value={settings.apiKey}
-                onChange={(event) =>
-                  setSettings((current) => ({
-                    ...current,
-                    apiKey: event.target.value,
-                  }))
-                }
-                autoComplete="off"
-                spellCheck={false}
-                disabled={!loaded}
-                aria-describedby="api-key-help"
-              />
-              <button
-                className="inline-icon-button"
-                type="button"
-                aria-label={showKey ? '隐藏 API Key' : '显示 API Key'}
-                onClick={() => setShowKey((current) => !current)}
-              >
-                {showKey ? (
-                  <EyeOff size={17} aria-hidden="true" />
-                ) : (
-                  <Eye size={17} aria-hidden="true" />
-                )}
-              </button>
+          <div className="field-stack">
+            <div className="field">
+              <label htmlFor="api-key">DeepSeek API Key</label>
+              <div className="input-frame">
+                <KeyRound size={18} aria-hidden="true" />
+                <input
+                  id="api-key"
+                  type={showKey ? 'text' : 'password'}
+                  value={settings.apiKey}
+                  onChange={(event) =>
+                    setSettings((current) => ({
+                      ...current,
+                      apiKey: event.target.value,
+                    }))
+                  }
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={!loaded}
+                  aria-describedby="api-key-help"
+                />
+                <button
+                  className="inline-icon-button"
+                  type="button"
+                  aria-label={
+                    showKey
+                      ? '隐藏 DeepSeek API Key'
+                      : '显示 DeepSeek API Key'
+                  }
+                  onClick={() => setShowKey((current) => !current)}
+                >
+                  {showKey ? (
+                    <EyeOff size={17} aria-hidden="true" />
+                  ) : (
+                    <Eye size={17} aria-hidden="true" />
+                  )}
+                </button>
+              </div>
+              <p id="api-key-help" className="field-help">
+                默认文本问题使用 DeepSeek。
+              </p>
             </div>
-            <p id="api-key-help" className="field-help">
-              密钥不会写入网页、普通日志或对话记录。
-            </p>
+
+            <div className="field">
+              <label htmlFor="vision-api-key">Doubao API Key</label>
+              <div className="input-frame">
+                <KeyRound size={18} aria-hidden="true" />
+                <input
+                  id="vision-api-key"
+                  type={showVisionKey ? 'text' : 'password'}
+                  value={settings.visionApiKey}
+                  onChange={(event) =>
+                    setSettings((current) => ({
+                      ...current,
+                      visionApiKey: event.target.value,
+                    }))
+                  }
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={!loaded}
+                  aria-describedby="vision-api-key-help"
+                />
+                <button
+                  className="inline-icon-button"
+                  type="button"
+                  aria-label={
+                    showVisionKey
+                      ? '隐藏 Doubao API Key'
+                      : '显示 Doubao API Key'
+                  }
+                  onClick={() => setShowVisionKey((current) => !current)}
+                >
+                  {showVisionKey ? (
+                    <EyeOff size={17} aria-hidden="true" />
+                  ) : (
+                    <Eye size={17} aria-hidden="true" />
+                  )}
+                </button>
+              </div>
+              <p id="vision-api-key-help" className="field-help">
+                仅当问题引用图片或框选区域时使用 Doubao。两个密钥都只保存在浏览器扩展本地存储中。
+              </p>
+            </div>
           </div>
         </section>
 

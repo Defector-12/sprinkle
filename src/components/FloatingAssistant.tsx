@@ -1,12 +1,15 @@
 import {
   Check,
+  Image,
   KeyRound,
   LoaderCircle,
   MessageCircle,
   Power,
   RefreshCw,
+  Scan,
   Send,
   Settings,
+  Trash2,
   X,
 } from 'lucide-react';
 import {
@@ -33,7 +36,11 @@ export interface FloatingAssistantBridge {
   activate(): Promise<PageContext>;
   deactivate(): Promise<PageContext>;
   hasApiKey(): Promise<boolean>;
+  hasVisionApiKey(): Promise<boolean>;
   ask(question: string): Promise<PageContext>;
+  startImagePicker(): Promise<void>;
+  startRegionPicker(): Promise<void>;
+  clearFocus(): Promise<PageContext>;
   openSettings(): Promise<void>;
   subscribe(listener: (context: PageContext) => void): () => void;
 }
@@ -394,6 +401,7 @@ function StatusPanel({
 export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   const [context, setContext] = useState<PageContext | null>(null);
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+  const [hasVisionApiKey, setHasVisionApiKey] = useState<boolean | null>(null);
   const [isVisible, setIsVisible] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -449,9 +457,15 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
 
   async function refreshApiKeyStatus() {
     try {
-      setHasApiKey(await bridge.hasApiKey());
+      const [nextHasApiKey, nextHasVisionApiKey] = await Promise.all([
+        bridge.hasApiKey(),
+        bridge.hasVisionApiKey(),
+      ]);
+      setHasApiKey(nextHasApiKey);
+      setHasVisionApiKey(nextHasVisionApiKey);
     } catch {
       setHasApiKey(false);
+      setHasVisionApiKey(false);
     }
   }
 
@@ -500,11 +514,16 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
 
   useEffect(() => {
     let active = true;
-    void Promise.all([bridge.initialize(), bridge.hasApiKey()])
-      .then(([nextContext, nextHasApiKey]) => {
+    void Promise.all([
+      bridge.initialize(),
+      bridge.hasApiKey(),
+      bridge.hasVisionApiKey(),
+    ])
+      .then(([nextContext, nextHasApiKey, nextHasVisionApiKey]) => {
         if (!active || explicitActivationRef.current) return;
         setContext(nextContext);
         setHasApiKey(nextHasApiKey);
+        setHasVisionApiKey(nextHasVisionApiKey);
         setIsVisible(nextContext.status !== 'unactivated');
       })
       .catch((cause: unknown) => {
@@ -613,6 +632,37 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       setError(cause instanceof Error ? cause.message : '问题发送失败');
     } finally {
       setIsSending(false);
+    }
+  }
+
+  async function startImagePicker() {
+    setError(null);
+    setIsOpen(false);
+    try {
+      await bridge.startImagePicker();
+    } catch (cause) {
+      setIsOpen(true);
+      setError(cause instanceof Error ? cause.message : '无法开始选择图片');
+    }
+  }
+
+  async function startRegionPicker() {
+    setError(null);
+    setIsOpen(false);
+    try {
+      await bridge.startRegionPicker();
+    } catch (cause) {
+      setIsOpen(true);
+      setError(cause instanceof Error ? cause.message : '无法开始框选区域');
+    }
+  }
+
+  async function clearFocus() {
+    setError(null);
+    try {
+      setContext(await bridge.clearFocus());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '无法移除引用');
     }
   }
 
@@ -861,9 +911,16 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     context?.status === 'parsing' ||
     context?.status === 'answering' ||
     isSending;
+  const requiresVision =
+    Boolean(context?.focus) && context?.focus?.type !== 'text';
+  const requiredApiKeyStatus = requiresVision
+    ? hasVisionApiKey
+    : hasApiKey;
   const canAsk =
-    hasApiKey === true &&
+    requiredApiKeyStatus === true &&
     (context?.status === 'ready' || context?.status === 'partial');
+  const canSelectImage =
+    context?.status === 'ready' || context?.status === 'partial';
 
   if (!isVisible) return null;
 
@@ -971,16 +1028,52 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
         />
       ) : (
         <>
-          {context?.focus?.type === 'text' && (
-            <aside className="cr-focus" aria-label="已引用的选中文字">
-              <span>已引用</span>
-              <p>{context.focus.text}</p>
+          {context?.focus && (
+            <aside
+              className={`cr-focus cr-focus--${context.focus.type}`}
+              aria-label={
+                context.focus.type === 'text'
+                  ? '已引用的选中文字'
+                  : '已引用的图片'
+              }
+            >
+              {context.focus.type === 'text' ? (
+                <>
+                  <span>已引用</span>
+                  <p>{context.focus.text}</p>
+                </>
+              ) : (
+                <>
+                  <img src={context.focus.imageUrl} alt="已引用图片预览" />
+                  <div>
+                    <strong>
+                      {context.focus.type === 'image'
+                        ? context.focus.alt ||
+                          context.focus.text ||
+                          '页面图片'
+                        : context.focus.text || '框选区域'}
+                    </strong>
+                    <span>
+                      {hasVisionApiKey === false
+                        ? '请先配置 Doubao API Key'
+                        : '含图片，发送时使用 Doubao'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="移除图片引用"
+                    onClick={() => void clearFocus()}
+                  >
+                    <Trash2 size={15} aria-hidden="true" />
+                  </button>
+                </>
+              )}
             </aside>
           )}
 
           <StatusPanel
             context={context}
-            hasApiKey={hasApiKey}
+            hasApiKey={requiredApiKeyStatus}
             onOpenSettings={() => void bridge.openSettings()}
             onOpenDiagnostics={() => setShowDiagnostics(true)}
             onRetry={() => void activatePage()}
@@ -1021,9 +1114,13 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
         </div>
           ) : (
         <div className="cr-empty">
-          <p>{hasApiKey === false ? '配置后即可提问' : '从当前页面开始提问'}</p>
+          <p>
+            {requiredApiKeyStatus === false
+              ? '配置后即可提问'
+              : '从当前页面开始提问'}
+          </p>
           <span>
-            {hasApiKey === false
+            {requiredApiKeyStatus === false
               ? 'API Key 只保存在这个浏览器中。'
               : '回答会结合已理解的页面内容。'}
           </span>
@@ -1041,6 +1138,27 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
         )}
           </div>
 
+          <div className="cr-composer-tools" aria-label="图片引用工具">
+            <button
+              type="button"
+              aria-label="点选页面图片"
+              disabled={!canSelectImage || isSending}
+              onClick={() => void startImagePicker()}
+            >
+              <Image size={15} aria-hidden="true" />
+              点选图片
+            </button>
+            <button
+              type="button"
+              aria-label="框选页面区域"
+              disabled={!canSelectImage || isSending}
+              onClick={() => void startRegionPicker()}
+            >
+              <Scan size={15} aria-hidden="true" />
+              框选区域
+            </button>
+          </div>
+
           <div className="cr-composer">
         <label className="cr-sr-only" htmlFor="context-reader-question">
           向当前文章提问
@@ -1051,7 +1169,13 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           rows={2}
           value={question}
           placeholder={
-            hasApiKey === false ? '请先填写 API Key' : canAsk ? '输入问题…' : statusLabel(context)
+            requiresVision && hasVisionApiKey === false
+              ? '请先填写 Doubao API Key'
+              : !requiresVision && hasApiKey === false
+                ? '请先填写 DeepSeek API Key'
+                : canAsk
+                  ? '输入问题…'
+                  : statusLabel(context)
           }
           disabled={!canAsk || isSending}
           onChange={(event) => setQuestion(event.target.value)}

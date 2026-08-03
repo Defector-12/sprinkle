@@ -13,7 +13,7 @@ createRoot(root).render(
   <StrictMode>
     <SidePanelApp
       bridge={new BrowserExtensionBridge()}
-      supportsVision={import.meta.env.VITE_MODEL_SUPPORTS_VISION === 'true'}
+      supportsVision
     />
   </StrictMode>,
 );

@@ -7,6 +7,7 @@
 - 网页默认保持休眠；只有用户点击工具栏图标后才解析页面并显示悬浮助手。
 - 页面正文和对话上下文按标签页与 URL 隔离。
 - 选中文字可以与文章相关片段组成文本问题。
+- 点选图片或框选可见页面区域可以组成多模态问题。
 - API Key 不进入网页上下文。
 - 页面关闭后清理临时正文。
 
@@ -20,6 +21,7 @@ Browser Action
             -> runtime message("context:activate")
             -> article extraction
             -> text selection
+            -> image / visible-region capture
             -> runtime message
                  -> Background Service Worker
                       -> storage.session: PageContext
@@ -42,6 +44,7 @@ Browser Action
 - 只运行在 HTTP / HTTPS 页面。
 - 在 `document_idle` 阶段挂载休眠的悬浮助手，但不请求页面解析。
 - 只有已启用页面才开放轻量文字快捷入口。
+- 图片点选、双击引用和区域框选只在页面启用后生效，捕获结果写入临时页面上下文。
 - 将选择结果发送给 Background，不持久化数据。
 
 ### Background Service Worker
@@ -162,24 +165,26 @@ article -> main -> [role="main"] -> body
 
 ## 6. 模型接口
 
-实现侧通过以下公开构建变量固定单一模型：
+实现侧通过以下公开构建变量固定文本与视觉模型：
 
 ```text
 VITE_MODEL_API_URL
 VITE_MODEL_ID
+VITE_VISION_MODEL_API_URL
+VITE_VISION_MODEL_ID
 ```
 
-用户设置只包含 API Key。当前客户端采用 OpenAI-compatible Chat Completions 结构：
+用户设置分别包含 DeepSeek 与 Doubao API Key。文本请求使用 OpenAI-compatible Chat Completions：
 
 ```json
 {
-  "model": "<fixed model>",
+  "model": "<DeepSeek model>",
   "messages": [],
   "stream": false
 }
 ```
 
-当前固定模型只支持文本消息，`VITE_MODEL_SUPPORTS_VISION=false` 时界面隐藏图片工具，运行时也会阻止图片请求。模型未配置、API Key 缺失、网络错误、HTTP 错误和无效响应均转化为明确的产品错误。
+当模型请求中包含 `image_url` 时，后台自动切换到 Doubao Ark Responses API，并将图片转换为 `input_image`、问题转换为 `input_text`。路由只依据请求内容，不提供手动模型选择，也不在失败后静默降级。模型未配置、对应 API Key 缺失、网络错误、HTTP 错误和无效响应均转化为明确的产品错误。
 
 ## 7. 存储
 
@@ -198,7 +203,8 @@ VITE_MODEL_ID
 
 保存：
 
-- API Key
+- DeepSeek API Key
+- Doubao API Key
 - 对话保留开关
 - 用户主动选择保留的问答文本
 
@@ -210,7 +216,7 @@ VITE_MODEL_ID
 ## 8. 安全边界
 
 - Content Script 无权读取 API Key。
-- API Key 不进入 DOM、普通日志、模型消息和对话归档。
+- 两个 API Key 都不进入 DOM、普通日志、模型消息和对话归档。
 - 模型请求只从 Background 发出。
 - 页面理解只由用户点击工具栏图标触发，并且只发生在浏览器本地。
 - 用户发送问题后才调用模型 API；Content Script 只能获得“是否已配置 Key”的布尔状态。

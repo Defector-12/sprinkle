@@ -34,8 +34,24 @@ export class ContentAssistantBridge implements FloatingAssistantBridge {
     return send<boolean>({ type: 'settings:has-key' });
   }
 
+  hasVisionApiKey(): Promise<boolean> {
+    return send<boolean>({ type: 'settings:has-vision-key' });
+  }
+
   ask(question: string): Promise<PageContext> {
     return send<PageContext>({ type: 'chat:ask', question });
+  }
+
+  async startImagePicker(): Promise<void> {
+    await send<void>({ type: 'picker:image:start' });
+  }
+
+  async startRegionPicker(): Promise<void> {
+    await send<void>({ type: 'picker:region:start' });
+  }
+
+  clearFocus(): Promise<PageContext> {
+    return send<PageContext>({ type: 'focus:clear' });
   }
 
   async openSettings(): Promise<void> {

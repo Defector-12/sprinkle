@@ -22,7 +22,12 @@ import type {
   ExtensionRequest,
   RuntimeResult,
 } from '../src/runtime/messages.ts';
-import { OpenAiCompatibleModelClient } from '../src/runtime/model-client.ts';
+import {
+  ArkResponsesModelClient,
+  OpenAiCompatibleModelClient,
+  RoutedModelClient,
+  requestContainsImage,
+} from '../src/runtime/model-client.ts';
 import {
   loadSettings,
   localStorageArea,
@@ -30,11 +35,22 @@ import {
 } from '../src/runtime/settings-store.ts';
 
 const environment = import.meta.env;
-const modelClient = new OpenAiCompatibleModelClient({
-  endpoint: environment.VITE_MODEL_API_URL?.trim() ?? '',
-  model: environment.VITE_MODEL_ID?.trim() ?? '',
-  supportsVision: environment.VITE_MODEL_SUPPORTS_VISION === 'true',
-});
+const modelClient = new RoutedModelClient(
+  new OpenAiCompatibleModelClient({
+    endpoint: environment.VITE_MODEL_API_URL?.trim() ?? '',
+    model: environment.VITE_MODEL_ID?.trim() ?? '',
+    supportsVision: false,
+  }),
+  new ArkResponsesModelClient({
+    endpoint:
+      environment.VITE_VISION_MODEL_API_URL?.trim() ||
+      'https://ark.cn-beijing.volces.com/api/v3/responses',
+    model:
+      environment.VITE_VISION_MODEL_ID?.trim() ||
+      'doubao-seed-2-0-mini-260428',
+    supportsVision: true,
+  }),
+);
 const contexts = new SessionContextRepository(sessionStorageArea());
 const conversations = new ConversationArchive(localStorageArea());
 
@@ -182,9 +198,6 @@ async function askPage(
   }
 
   const settings = await loadSettings();
-  if (!settings.apiKey.trim()) {
-    throw new Error('请先在设置中填写 API Key。');
-  }
 
   const chunks = createArticleChunks(current.article.blocks);
   const relevantChunks = retrieveRelevantChunks(chunks, {
@@ -199,6 +212,17 @@ async function askPage(
     history: current.messages,
     focus: current.focus,
   });
+  const containsImage = requestContainsImage(request);
+  const missingKey = containsImage
+    ? !settings.visionApiKey.trim()
+    : !settings.apiKey.trim();
+  if (missingKey) {
+    throw new Error(
+      containsImage
+        ? '请先在设置中填写 Doubao API Key。'
+        : '请先在设置中填写 DeepSeek API Key。',
+    );
+  }
   const withQuestion: PageContext = {
     ...current,
     status: 'answering',
@@ -209,7 +233,13 @@ async function askPage(
   await notify(withQuestion);
 
   try {
-    const answer = await modelClient.complete(settings.apiKey, request);
+    const answer = await modelClient.complete(
+      {
+        textApiKey: settings.apiKey,
+        visionApiKey: settings.visionApiKey,
+      },
+      request,
+    );
     const completed: PageContext = {
       ...withQuestion,
       status: current.article.isPartial ? 'partial' : 'ready',
@@ -275,6 +305,18 @@ async function setFocusFromPage(
   return updated;
 }
 
+async function clearFocus(tab: PageTab): Promise<PageContext> {
+  const current = await getOrCreateContext(tab);
+  const updated: PageContext = {
+    ...current,
+    focus: null,
+    updatedAt: Date.now(),
+  };
+  await contexts.save(updated);
+  await notify(updated);
+  return updated;
+}
+
 async function handleRequest(
   request: ExtensionRequest,
   sender: Browser.runtime.MessageSender,
@@ -300,6 +342,8 @@ async function handleRequest(
         return success(undefined);
       case 'focus:set':
         return success(await setFocusFromPage(request.focus, sender));
+      case 'focus:clear':
+        return success(await clearFocus(await requestTab(sender)));
       case 'capture:visible': {
         if (!sender.tab) throw new Error('无法识别当前标签页。');
         return success(
@@ -313,6 +357,8 @@ async function handleRequest(
         return success(undefined);
       case 'settings:has-key':
         return success(Boolean((await loadSettings()).apiKey.trim()));
+      case 'settings:has-vision-key':
+        return success(Boolean((await loadSettings()).visionApiKey.trim()));
     }
   } catch (cause) {
     return failure(cause);

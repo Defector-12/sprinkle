@@ -11,6 +11,7 @@ const SETTINGS_KEY = 'context-reader:settings';
 
 export const DEFAULT_SETTINGS: UserSettings = {
   apiKey: '',
+  visionApiKey: '',
   retainConversations: false,
 };
 
@@ -35,6 +36,8 @@ export async function loadSettings(): Promise<UserSettings> {
   const stored = result[SETTINGS_KEY] as Partial<UserSettings> | undefined;
   return {
     apiKey: typeof stored?.apiKey === 'string' ? stored.apiKey : '',
+    visionApiKey:
+      typeof stored?.visionApiKey === 'string' ? stored.visionApiKey : '',
     retainConversations:
       typeof stored?.retainConversations === 'boolean'
         ? stored.retainConversations

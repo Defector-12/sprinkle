@@ -308,6 +308,65 @@ textarea:disabled {
   line-clamp: 2;
 }
 
+.cr-focus--image,
+.cr-focus--region {
+  grid-template-columns: 52px minmax(0, 1fr) 30px;
+  align-items: center;
+  background: var(--cr-color-surface-muted);
+}
+
+.cr-focus img {
+  display: block;
+  width: 52px;
+  height: 42px;
+  border: 1px solid var(--cr-color-border);
+  border-radius: var(--cr-radius-sm);
+  background: var(--cr-color-surface);
+  object-fit: cover;
+}
+
+.cr-focus > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.cr-focus > div strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cr-focus > div span {
+  border: 0;
+  padding: 0;
+  color: var(--cr-color-ink-muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.cr-focus > button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--cr-radius-round);
+  background: transparent;
+  color: var(--cr-color-ink-muted);
+  cursor: pointer;
+}
+
+.cr-focus > button:hover {
+  background: var(--cr-color-border);
+  color: var(--cr-color-ink);
+}
+
 .cr-state {
   display: grid;
   flex: 0 0 auto;
@@ -763,10 +822,37 @@ textarea:disabled {
   color: var(--cr-color-warning);
 }
 
+.cr-composer-tools {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--cr-space-2);
+  border-top: 1px solid var(--cr-color-border);
+  padding: var(--cr-space-2) var(--cr-space-3) 0;
+}
+
+.cr-composer-tools button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--cr-color-border);
+  border-radius: var(--cr-radius-round);
+  background: var(--cr-color-surface);
+  color: var(--cr-color-ink-muted);
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cr-composer-tools button:hover:not(:disabled) {
+  border-color: var(--cr-color-ink-muted);
+  color: var(--cr-color-ink);
+}
+
 .cr-composer {
   position: relative;
   flex: 0 0 auto;
-  border-top: 1px solid var(--cr-color-border);
   padding: var(--cr-space-3);
 }
 
