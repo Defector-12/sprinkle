@@ -1,6 +1,12 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   StudyWorkspace,
@@ -25,6 +31,7 @@ const readyContext: PageContext = {
         text: 'Architecture',
         section: 'Architecture',
         order: 0,
+        level: 2,
       },
       {
         id: 'paragraph',
@@ -40,6 +47,14 @@ const readyContext: PageContext = {
         section: 'Architecture',
         order: 2,
       },
+      {
+        id: 'heading-details',
+        type: 'heading',
+        text: 'Memory Update',
+        section: 'Memory Update',
+        order: 3,
+        level: 3,
+      },
     ],
     images: [
       {
@@ -50,6 +65,59 @@ const readyContext: PageContext = {
         section: 'Architecture',
         surroundingText: 'Working memory flow',
         order: 2,
+      },
+    ],
+    tables: [
+      {
+        id: 'table-1',
+        caption: 'Memory comparison',
+        section: 'Architecture',
+        order: 2,
+        rows: [
+          {
+            cells: [
+              {
+                text: 'Metric',
+                header: true,
+                colSpan: 1,
+                rowSpan: 1,
+              },
+              {
+                text: 'Value',
+                header: true,
+                colSpan: 1,
+                rowSpan: 1,
+              },
+            ],
+          },
+          {
+            cells: [
+              {
+                text: 'Context window',
+                header: true,
+                colSpan: 1,
+                rowSpan: 1,
+              },
+              {
+                text: '1M tokens',
+                header: false,
+                colSpan: 1,
+                rowSpan: 1,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    formulas: [
+      {
+        id: 'formula-1',
+        tex: 'I - \\beta_t',
+        mathml:
+          '<math display="block"><mrow><mi>I</mi><mo>−</mo><msub><mi>β</mi><mi>t</mi></msub></mrow></math>',
+        section: 'Memory Update',
+        order: 4,
+        display: 'block',
       },
     ],
     isPartial: false,
@@ -88,6 +156,11 @@ function createBridge(
 }
 
 describe('StudyWorkspace', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
   it('renders a scrollable article beside the existing model conversation', async () => {
     render(<StudyWorkspace bridge={createBridge()} />);
 
@@ -98,6 +171,22 @@ describe('StudyWorkspace', () => {
     ).toBeVisible();
     expect(screen.getByText('Working memory carries the current reasoning state.')).toBeVisible();
     expect(screen.getByText('memory.update(observation)')).toBeVisible();
+    expect(
+      screen.getByRole('navigation', { name: '资料目录' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('link', { name: 'Architecture' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('link', { name: 'Memory Update' }),
+    ).toHaveAttribute('data-level', '3');
+    expect(
+      screen.getByRole('table', { name: 'Memory comparison' }),
+    ).toBeVisible();
+    expect(screen.getByText('1M tokens')).toBeVisible();
+    expect(
+      screen.getByTestId('study-formula-formula-1').innerHTML,
+    ).toContain('<math');
     expect(
       screen.getByRole('img', { name: 'Agent memory architecture' }),
     ).toBeVisible();
@@ -112,6 +201,67 @@ describe('StudyWorkspace', () => {
     expect(screen.getByText('DeepSeek')).toBeVisible();
     expect(
       screen.getByRole('textbox', { name: '向当前资料提问' }),
+    ).toBeVisible();
+  });
+
+  it('navigates from the generated table of contents to a document heading', async () => {
+    render(<StudyWorkspace bridge={createBridge()} />);
+    const target = await screen.findByRole('heading', {
+      name: 'Memory Update',
+    });
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(target, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    await userEvent.click(
+      screen.getByRole('link', { name: 'Memory Update' }),
+    );
+
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  });
+
+  it('reveals a new model answer with a typewriter effect', async () => {
+    const streamingContext: PageContext = {
+      ...readyContext,
+      messages: [
+        ...readyContext.messages,
+        {
+          id: 'assistant-streaming',
+          role: 'assistant',
+          content: 'This answer appears progressively.',
+          createdAt: 2,
+          answeredBy: 'deepseek',
+        },
+      ],
+    };
+    const bridge = createBridge({
+      ask: vi.fn().mockResolvedValue(streamingContext),
+    });
+    render(<StudyWorkspace bridge={bridge} />);
+    const input = await screen.findByRole('textbox', {
+      name: '向当前资料提问',
+    });
+
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'Explain the update.' } });
+      fireEvent.click(screen.getByRole('button', { name: '发送问题' }));
+      await Promise.resolve();
+    });
+    expect(
+      screen.queryByText('This answer appears progressively.'),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(
+      screen.getByText('This answer appears progressively.'),
     ).toBeVisible();
   });
 
