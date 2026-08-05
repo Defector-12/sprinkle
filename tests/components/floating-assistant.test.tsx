@@ -277,6 +277,85 @@ describe('FloatingAssistant', () => {
     expect(screen.getByText('DeepSeek')).toBeVisible();
   });
 
+  it('scrolls to the newest conversation content after sending', async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const answeredContext: PageContext = {
+      ...readyContext,
+      messages: [
+        {
+          id: 'user-latest',
+          role: 'user',
+          content: '最新问题',
+          createdAt: 1,
+        },
+        {
+          id: 'assistant-latest',
+          role: 'assistant',
+          content: '最新回答',
+          createdAt: 2,
+          answeredBy: 'deepseek',
+        },
+      ],
+    };
+    const bridge = createBridge(readyContext, {
+      ask: vi.fn().mockResolvedValue(answeredContext),
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    scrollIntoView.mockClear();
+
+    const input = screen.getByRole('textbox', { name: '向当前文章提问' });
+    await userEvent.type(input, '最新问题');
+    await userEvent.keyboard('{Enter}');
+
+    await waitFor(() =>
+      expect(scrollIntoView).toHaveBeenCalledWith({
+        behavior: 'smooth',
+        block: 'end',
+      }),
+    );
+  });
+
+  it('auto-grows and maximizes the composer while Enter inserts a newline', async () => {
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    const input = screen.getByRole('textbox', { name: '向当前文章提问' });
+    Object.defineProperty(input, 'scrollHeight', {
+      configurable: true,
+      value: 180,
+    });
+
+    await userEvent.type(input, '第一行很长的输入内容');
+    expect(input).toHaveStyle({ height: '180px' });
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '最大化输入框' }),
+    );
+    expect(input).toHaveAttribute('aria-expanded', 'true');
+    expect(
+      screen.getByRole('button', { name: '恢复输入框' }),
+    ).toBeVisible();
+
+    await userEvent.type(input, '{Enter}第二行');
+    expect(input).toHaveValue('第一行很长的输入内容\n第二行');
+    expect(bridge.ask).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '恢复输入框' }),
+    );
+    await userEvent.type(input, '{Enter}');
+    expect(bridge.ask).toHaveBeenCalledWith('第一行很长的输入内容\n第二行');
+  });
+
   it('labels each answer with its actual model and keeps a fallback for old messages', async () => {
     const bridge = createBridge({
       ...readyContext,

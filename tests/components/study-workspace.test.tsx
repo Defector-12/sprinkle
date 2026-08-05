@@ -462,4 +462,84 @@ describe('StudyWorkspace', () => {
       ),
     );
   });
+
+  it('scrolls the web conversation to its newest content after sending', async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const answeredContext: PageContext = {
+      ...readyContext,
+      messages: [
+        ...readyContext.messages,
+        {
+          id: 'user-latest',
+          role: 'user',
+          content: '最新问题',
+          createdAt: 2,
+        },
+        {
+          id: 'assistant-latest',
+          role: 'assistant',
+          content: '最新回答',
+          createdAt: 3,
+          answeredBy: 'deepseek',
+        },
+      ],
+    };
+    const bridge = createBridge({
+      ask: vi.fn().mockResolvedValue(answeredContext),
+    });
+    render(<StudyWorkspace bridge={bridge} />);
+    const input = await screen.findByRole('textbox', {
+      name: '向当前资料提问',
+    });
+    scrollIntoView.mockClear();
+
+    await userEvent.type(input, '最新问题');
+    await userEvent.click(screen.getByRole('button', { name: '发送问题' }));
+
+    await waitFor(() =>
+      expect(scrollIntoView).toHaveBeenCalledWith({
+        behavior: 'smooth',
+        block: 'end',
+      }),
+    );
+  });
+
+  it('auto-grows and maximizes the web composer while Enter inserts a newline', async () => {
+    const bridge = createBridge();
+    render(<StudyWorkspace bridge={bridge} />);
+    const input = await screen.findByRole('textbox', {
+      name: '向当前资料提问',
+    });
+    Object.defineProperty(input, 'scrollHeight', {
+      configurable: true,
+      value: 240,
+    });
+
+    await userEvent.type(input, '第一行很长的研究问题');
+    expect(input).toHaveStyle({ height: '240px' });
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '最大化输入框' }),
+    );
+    expect(input).toHaveAttribute('aria-expanded', 'true');
+    expect(
+      screen.getByRole('button', { name: '恢复输入框' }),
+    ).toBeVisible();
+
+    await userEvent.type(input, '{Enter}第二行补充');
+    expect(input).toHaveValue('第一行很长的研究问题\n第二行补充');
+    expect(bridge.ask).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '恢复输入框' }),
+    );
+    await userEvent.type(input, '{Enter}');
+    expect(bridge.ask).toHaveBeenCalledWith(
+      '第一行很长的研究问题\n第二行补充',
+    );
+  });
 });
