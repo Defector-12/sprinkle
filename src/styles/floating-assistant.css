@@ -860,12 +860,12 @@ textarea:disabled {
   display: block;
   width: 100%;
   min-height: 64px;
-  max-height: 132px;
+  max-height: min(42vh, 320px);
   resize: none;
   border: 1px solid var(--cr-color-border);
   border-radius: var(--cr-radius-md);
   background: var(--cr-color-surface);
-  padding: 10px 46px 10px 11px;
+  padding: 10px 86px 10px 11px;
   font-size: 13px;
   line-height: 1.5;
   transition:
@@ -887,19 +887,41 @@ textarea:disabled {
   opacity: 1;
 }
 
-.cr-send {
+.cr-composer__actions {
   position: absolute;
   right: 20px;
   bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cr-composer__maximize,
+.cr-send {
   display: grid;
   width: 32px;
   height: 32px;
   place-items: center;
-  border: 1px solid var(--cr-color-accent);
   border-radius: var(--cr-radius-round);
+  cursor: pointer;
+}
+
+.cr-composer__maximize {
+  border: 1px solid var(--cr-color-border);
+  background: var(--cr-color-surface);
+  color: var(--cr-color-ink-muted);
+}
+
+.cr-composer__maximize:hover {
+  border-color: var(--cr-color-ink-muted);
+  background: var(--cr-color-surface-muted);
+  color: var(--cr-color-ink);
+}
+
+.cr-send {
+  border: 1px solid var(--cr-color-accent);
   background: var(--cr-color-accent);
   color: var(--cr-color-accent-ink);
-  cursor: pointer;
   transition:
     background var(--cr-duration-fast) var(--cr-ease-out),
     transform var(--cr-duration-fast) var(--cr-ease-out);
@@ -920,6 +942,31 @@ textarea:disabled {
 
 .cr-send[data-state="loading"] {
   cursor: wait;
+}
+
+.cr-dialog--composer-maximized .cr-focus,
+.cr-dialog--composer-maximized .cr-state,
+.cr-dialog--composer-maximized .cr-messages,
+.cr-dialog--composer-maximized .cr-empty,
+.cr-dialog--composer-maximized .cr-understanding,
+.cr-dialog--composer-maximized .cr-feedback,
+.cr-dialog--composer-maximized .cr-composer-tools,
+.cr-dialog--composer-maximized .cr-resize-handle {
+  display: none;
+}
+
+.cr-dialog--composer-maximized .cr-composer {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.cr-dialog--composer-maximized .cr-composer textarea {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+  padding-bottom: 52px;
+  overflow-y: auto;
 }
 
 .cr-spin {

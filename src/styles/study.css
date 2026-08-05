@@ -582,6 +582,11 @@ textarea:focus-visible,
   list-style: none;
 }
 
+.study-messages__end {
+  width: 0;
+  height: 0;
+}
+
 .study-message {
   max-width: 92%;
   margin-bottom: 30px;
@@ -693,29 +698,74 @@ textarea:focus-visible,
   display: block;
   width: 100%;
   min-height: 92px;
-  max-height: 210px;
-  resize: vertical;
+  max-height: min(42vh, 360px);
+  resize: none;
   border: 1px solid var(--study-line-strong);
   border-radius: 8px;
   background: var(--study-paper);
-  padding: 14px 54px 14px 14px;
+  padding: 14px 94px 14px 14px;
   font-size: 13px;
   line-height: 1.6;
 }
 
-.study-composer > button {
+.study-composer__actions {
   position: absolute;
   right: 30px;
   bottom: 30px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.study-composer__maximize,
+.study-composer__send {
   display: grid;
   width: 36px;
   height: 36px;
   place-items: center;
-  border: 1px solid var(--study-accent);
   border-radius: 50%;
+  cursor: pointer;
+}
+
+.study-composer__maximize {
+  border: 1px solid var(--study-line-strong);
+  background: var(--study-paper);
+  color: var(--study-muted);
+}
+
+.study-composer__maximize:hover {
+  border-color: var(--study-ink);
+  color: var(--study-ink);
+}
+
+.study-composer__send {
+  border: 1px solid var(--study-accent);
   background: var(--study-accent);
   color: white;
-  cursor: pointer;
+}
+
+.study-chat--composer-maximized {
+  grid-template-rows: 78px minmax(0, 1fr);
+}
+
+.study-chat--composer-maximized .study-messages,
+.study-chat--composer-maximized .study-feedback {
+  display: none;
+}
+
+.study-chat--composer-maximized .study-composer {
+  display: flex;
+  min-height: 0;
+  grid-row: 2;
+  flex-direction: column;
+}
+
+.study-chat--composer-maximized .study-composer textarea {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+  padding-bottom: 58px;
+  overflow-y: auto;
 }
 
 .study-focus {

@@ -3,6 +3,8 @@ import {
   ExternalLink,
   Image as ImageIcon,
   LoaderCircle,
+  Maximize2,
+  Minimize2,
   Quote,
   Scan,
   X,
@@ -28,6 +30,7 @@ import type {
 } from '../core/types.ts';
 import { sanitizeMathMl } from '../core/mathml.ts';
 import type { StudyCaptureRect } from '../runtime/messages.ts';
+import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
 
 export interface StudyWorkspaceBridgeContract {
   initialize(): Promise<PageContext>;
@@ -291,6 +294,7 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     useState<SelectionAction | null>(null);
   const [imagePickMode, setImagePickMode] = useState(false);
   const [question, setQuestion] = useState('');
+  const [isComposerMaximized, setIsComposerMaximized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [regionMode, setRegionMode] = useState(false);
@@ -304,10 +308,12 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
   const workspaceRef = useRef<HTMLElement>(null);
   const documentRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messagesEndRef = useRef<HTMLLIElement>(null);
   const dividerDrag = useRef(false);
   const regionDrag = useRef(false);
   const regionRef = useRef<RegionSelection | null>(null);
   const awaitingAnswerRef = useRef(false);
+  useAutoGrowTextarea(inputRef, question, isComposerMaximized, 92);
 
   useEffect(() => {
     let active = true;
@@ -363,6 +369,26 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     }, STREAM_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [streamingTarget]);
+
+  useEffect(() => {
+    if (isComposerMaximized) return;
+    messagesEndRef.current?.scrollIntoView?.({
+      behavior: 'smooth',
+      block: 'end',
+    });
+  }, [context?.messages, isComposerMaximized]);
+
+  useEffect(() => {
+    if (isComposerMaximized || !streamingTarget) return;
+    messagesEndRef.current?.scrollIntoView?.({
+      behavior: 'auto',
+      block: 'end',
+    });
+  }, [isComposerMaximized, revealedCount, streamingTarget]);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [isComposerMaximized]);
 
   function resizeFromPointer(clientX: number) {
     if (!Number.isFinite(clientX)) return;
@@ -843,7 +869,12 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
         <span aria-hidden="true" />
       </div>
 
-      <section className="study-chat" aria-labelledby="study-chat-title">
+      <section
+        className={`study-chat${
+          isComposerMaximized ? ' study-chat--composer-maximized' : ''
+        }`}
+        aria-labelledby="study-chat-title"
+      >
         <header className="study-chat__header">
           <div>
             <p>研究对话</p>
@@ -886,6 +917,11 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
               </p>
             </li>
           ))}
+          <li
+            ref={messagesEndRef}
+            className="study-messages__end"
+            aria-hidden="true"
+          />
         </ol>
 
         <div className="study-feedback" aria-live="polite" aria-atomic="true">
@@ -905,12 +941,14 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
             id="study-question"
             rows={3}
             value={question}
+            aria-expanded={isComposerMaximized}
             placeholder="记录你的问题、反例或推演…"
             disabled={busy}
             onChange={(event) => setQuestion(event.target.value)}
             onKeyDown={(event) => {
               if (
                 event.key === 'Enter' &&
+                !isComposerMaximized &&
                 !event.shiftKey &&
                 !event.nativeEvent.isComposing
               ) {
@@ -919,18 +957,39 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
               }
             }}
           />
-          <button
-            type="button"
-            aria-label="发送问题"
-            disabled={busy || !question.trim()}
-            onClick={() => void sendQuestion()}
-          >
-            {busy ? (
-              <LoaderCircle className="spin" size={18} aria-hidden="true" />
-            ) : (
-              <ArrowUp size={19} aria-hidden="true" />
-            )}
-          </button>
+          <div className="study-composer__actions">
+            <button
+              className="study-composer__maximize"
+              type="button"
+              aria-label={
+                isComposerMaximized ? '恢复输入框' : '最大化输入框'
+              }
+              aria-pressed={isComposerMaximized}
+              title={isComposerMaximized ? '恢复输入框' : '最大化输入框'}
+              onClick={() =>
+                setIsComposerMaximized((current) => !current)
+              }
+            >
+              {isComposerMaximized ? (
+                <Minimize2 size={17} aria-hidden="true" />
+              ) : (
+                <Maximize2 size={17} aria-hidden="true" />
+              )}
+            </button>
+            <button
+              className="study-composer__send"
+              type="button"
+              aria-label="发送问题"
+              disabled={busy || !question.trim()}
+              onClick={() => void sendQuestion()}
+            >
+              {busy ? (
+                <LoaderCircle className="spin" size={18} aria-hidden="true" />
+              ) : (
+                <ArrowUp size={19} aria-hidden="true" />
+              )}
+            </button>
+          </div>
         </div>
       </section>
     </main>

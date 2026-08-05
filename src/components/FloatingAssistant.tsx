@@ -3,7 +3,9 @@ import {
   Image,
   KeyRound,
   LoaderCircle,
+  Maximize2,
   MessageCircle,
+  Minimize2,
   PanelsTopLeft,
   Power,
   RefreshCw,
@@ -24,6 +26,7 @@ import {
 
 import type { PageContext } from '../core/types.ts';
 import { ArticleDiagnosticsPanel } from './ArticleDiagnosticsPanel.tsx';
+import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
 
 export const FLOATING_ASSISTANT_OPEN_EVENT = 'context-reader:open';
 export const FLOATING_ASSISTANT_ACTIVE_EVENT = 'context-reader:active';
@@ -416,6 +419,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [question, setQuestion] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isComposerMaximized, setIsComposerMaximized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [orbPos, setOrbPos] = useState<OrbPosition>(() =>
     defaultOrbPosition(),
@@ -463,6 +467,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   } | null>(null);
   const draggedRef = useRef(false);
   const layout = dialogLayout(orbPos, dialogSize, dialogPosition);
+  useAutoGrowTextarea(inputRef, question, isComposerMaximized, 64);
 
   async function refreshApiKeyStatus() {
     try {
@@ -514,6 +519,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       setDialogSize(null);
       setDialogPosition(null);
       setQuestion('');
+      setIsComposerMaximized(false);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : '停止理解失败，请稍后重试。',
@@ -556,6 +562,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     const closeWithEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setShowDiagnostics(false);
+        setIsComposerMaximized(false);
         setIsOpen(false);
       }
     };
@@ -598,7 +605,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   useEffect(() => {
     if (!isOpen) return;
     inputRef.current?.focus();
-  }, [isOpen]);
+  }, [isComposerMaximized, isOpen]);
 
   const lastMessage = context?.messages.at(-1) ?? null;
   const streamingId =
@@ -624,9 +631,20 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   }, [streamingId, streamingContent]);
 
   useEffect(() => {
-    if (!isOpen) return;
-    messagesEndRef.current?.scrollIntoView?.({ block: 'nearest' });
-  }, [context?.messages, revealed, isOpen]);
+    if (!isOpen || isComposerMaximized) return;
+    messagesEndRef.current?.scrollIntoView?.({
+      behavior: 'smooth',
+      block: 'end',
+    });
+  }, [context?.messages, isComposerMaximized, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || isComposerMaximized || !revealed) return;
+    messagesEndRef.current?.scrollIntoView?.({
+      behavior: 'auto',
+      block: 'end',
+    });
+  }, [isComposerMaximized, isOpen, revealed]);
 
   async function sendQuestion() {
     const value = question.trim();
@@ -968,10 +986,15 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       id="context-reader-dialog"
       className={`cr-dialog${isResizing ? ' cr-dialog--resizing' : ''}${
         isMovingDialog ? ' cr-dialog--moving' : ''
-      }`}
+      }${isComposerMaximized ? ' cr-dialog--composer-maximized' : ''}`}
       role="dialog"
       aria-label="Context Reader 对话"
-      style={layout.style}
+      style={{
+        ...layout.style,
+        ...(isComposerMaximized && !layout.style.height
+          ? { height: layout.maxHeight }
+          : {}),
+      }}
     >
       <header className="cr-header">
         <div
@@ -1027,6 +1050,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             aria-label="收起 Context Reader"
             onClick={() => {
               setShowDiagnostics(false);
+              setIsComposerMaximized(false);
               setIsOpen(false);
             }}
           >
@@ -1186,6 +1210,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           ref={inputRef}
           rows={2}
           value={question}
+          aria-expanded={isComposerMaximized}
           placeholder={
             requiresVision && hasVisionApiKey === false
               ? '请先填写 Doubao API Key'
@@ -1200,6 +1225,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           onKeyDown={(event) => {
             if (
               event.key === 'Enter' &&
+              !isComposerMaximized &&
               !event.shiftKey &&
               !event.nativeEvent.isComposing
             ) {
@@ -1208,20 +1234,40 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             }
           }}
         />
-        <button
-          className="cr-send"
-          type="button"
-          aria-label="发送问题"
-          disabled={!canAsk || isSending || !question.trim()}
-          data-state={error ? 'error' : isSending ? 'loading' : 'default'}
-          onClick={() => void sendQuestion()}
-        >
-          {isBusy ? (
-            <LoaderCircle className="cr-spin" size={17} aria-hidden="true" />
-          ) : (
-            <Send size={16} aria-hidden="true" />
-          )}
-        </button>
+        <div className="cr-composer__actions">
+          <button
+            className="cr-composer__maximize"
+            type="button"
+            aria-label={
+              isComposerMaximized ? '恢复输入框' : '最大化输入框'
+            }
+            aria-pressed={isComposerMaximized}
+            title={isComposerMaximized ? '恢复输入框' : '最大化输入框'}
+            onClick={() =>
+              setIsComposerMaximized((current) => !current)
+            }
+          >
+            {isComposerMaximized ? (
+              <Minimize2 size={15} aria-hidden="true" />
+            ) : (
+              <Maximize2 size={15} aria-hidden="true" />
+            )}
+          </button>
+          <button
+            className="cr-send"
+            type="button"
+            aria-label="发送问题"
+            disabled={!canAsk || isSending || !question.trim()}
+            data-state={error ? 'error' : isSending ? 'loading' : 'default'}
+            onClick={() => void sendQuestion()}
+          >
+            {isBusy ? (
+              <LoaderCircle className="cr-spin" size={17} aria-hidden="true" />
+            ) : (
+              <Send size={16} aria-hidden="true" />
+            )}
+          </button>
+        </div>
           </div>
         </>
       )}
