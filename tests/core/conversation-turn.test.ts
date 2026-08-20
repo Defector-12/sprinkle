@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { completeQuestionTurn } from '../../src/core/conversation-turn.ts';
+import {
+  completeQuestionTurn,
+  snapshotMessageReference,
+} from '../../src/core/conversation-turn.ts';
 import { buildModelRequest } from '../../src/core/model-request.ts';
 import type {
   ArticleDocument,
@@ -40,6 +43,30 @@ const assistantMessage: ChatMessage = {
 };
 
 describe('completeQuestionTurn', () => {
+  it('creates an immutable reference snapshot for the user message', () => {
+    const imageFocus = {
+      type: 'image' as const,
+      imageUrl: 'data:image/jpeg;base64,diagram',
+      alt: 'Agent memory diagram',
+      text: 'Working memory flow',
+      section: 'Architecture',
+      source: 'screenshot' as const,
+    };
+
+    const reference = snapshotMessageReference(imageFocus);
+    imageFocus.text = 'Changed after sending';
+
+    expect(reference).toEqual({
+      type: 'image',
+      imageUrl: 'data:image/jpeg;base64,diagram',
+      alt: 'Agent memory diagram',
+      text: 'Working memory flow',
+      section: 'Architecture',
+      source: 'screenshot',
+    });
+    expect(snapshotMessageReference(null)).toBeUndefined();
+  });
+
   it('consumes the image after a successful turn while preserving text history for the next model', () => {
     const answeringContext: PageContext = {
       key: '7:https://example.com/agent-memory',

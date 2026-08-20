@@ -393,6 +393,74 @@ describe('FloatingAssistant', () => {
     expect(screen.getByText('助手')).toBeVisible();
   });
 
+  it('renders assistant Markdown and shows the reference used by the user', async () => {
+    const bridge = createBridge({
+      ...readyContext,
+      messages: [
+        {
+          id: 'user-referenced',
+          role: 'user',
+          content: '这里的工作记忆有什么作用？',
+          createdAt: 1,
+          reference: {
+            type: 'text',
+            text: 'Working memory carries the current reasoning state.',
+            section: 'Architecture',
+          },
+        },
+        {
+          id: 'assistant-markdown',
+          role: 'assistant',
+          content: [
+            '## 核心作用',
+            '',
+            '**工作记忆**主要负责：',
+            '',
+            '- 保存当前状态',
+            '- 支持下一步推理',
+            '',
+            '`memory.update()` 会更新状态。',
+            '',
+            '[查看资料](https://example.com/docs)',
+            '',
+            '<script>window.__unsafe = true</script>',
+          ].join('\n'),
+          createdAt: 2,
+          answeredBy: 'deepseek',
+        },
+      ],
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+
+    expect(
+      await screen.findByRole(
+        'heading',
+        { name: '核心作用', level: 2 },
+        { timeout: 3_000 },
+      ),
+    ).toBeVisible();
+    expect(screen.getByText('工作记忆', { selector: 'strong' })).toBeVisible();
+    expect(screen.getByRole('listitem', { name: '保存当前状态' })).toBeVisible();
+    expect(screen.getByText('memory.update()', { selector: 'code' })).toBeVisible();
+    expect(screen.getByRole('link', { name: '查看资料' })).toHaveAttribute(
+      'target',
+      '_blank',
+    );
+    expect(screen.getByRole('note', { name: '提问引用' })).toHaveTextContent(
+      'Working memory carries the current reasoning state.',
+    );
+    expect(
+      screen
+        .getByRole('dialog', { name: 'Context Reader 对话' })
+        .querySelector('script'),
+    ).toBeNull();
+    expect(screen.queryByText('window.__unsafe = true')).not.toBeInTheDocument();
+  });
+
   it('shows an explicit understanding state while the page is being parsed', async () => {
     const bridge = createBridge(unactivatedContext, {
       activate: vi.fn().mockReturnValue(new Promise(() => undefined)),

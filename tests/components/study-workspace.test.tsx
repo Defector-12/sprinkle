@@ -204,6 +204,59 @@ describe('StudyWorkspace', () => {
     ).toBeVisible();
   });
 
+  it('renders GFM answers and keeps the image reference attached to its question', async () => {
+    const context: PageContext = {
+      ...readyContext,
+      messages: [
+        {
+          id: 'user-image-reference',
+          role: 'user',
+          content: '比较图中的两个指标。',
+          createdAt: 1,
+          reference: {
+            type: 'image',
+            imageUrl: 'data:image/png;base64,chart',
+            alt: '模型指标对比图',
+            text: 'Figure 2',
+            section: 'Benchmarks',
+            source: 'screenshot',
+          },
+        },
+        {
+          id: 'assistant-gfm',
+          role: 'assistant',
+          content: [
+            '### 指标对比',
+            '',
+            '| 指标 | 结果 |',
+            '| --- | ---: |',
+            '| Accuracy | **92%** |',
+          ].join('\n'),
+          createdAt: 2,
+          answeredBy: 'doubao',
+        },
+      ],
+    };
+    render(
+      <StudyWorkspace
+        bridge={createBridge({
+          initialize: vi.fn().mockResolvedValue(context),
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: '指标对比', level: 3 }),
+    ).toBeVisible();
+    expect(screen.getByRole('table')).toHaveTextContent('Accuracy92%');
+    expect(
+      screen.getByRole('img', { name: '模型指标对比图' }),
+    ).toHaveAttribute('src', 'data:image/png;base64,chart');
+    expect(screen.getByRole('note', { name: '提问引用' })).toHaveTextContent(
+      'Benchmarks',
+    );
+  });
+
   it('navigates from the generated table of contents to a document heading', async () => {
     render(<StudyWorkspace bridge={createBridge()} />);
     const target = await screen.findByRole('heading', {

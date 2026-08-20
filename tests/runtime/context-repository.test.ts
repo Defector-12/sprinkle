@@ -110,14 +110,43 @@ describe('ConversationArchive', () => {
   it('persists messages without article, focus, or image data', async () => {
     const storage = new MemoryStorage();
     const archive = new ConversationArchive(storage);
-    const context = createContext(4, 'https://example.com/article');
+    const context: PageContext = {
+      ...createContext(4, 'https://example.com/article'),
+      messages: [
+        {
+          id: 'message',
+          role: 'user',
+          content: 'Question',
+          createdAt: 1,
+          reference: {
+            type: 'region',
+            imageUrl: 'data:image/jpeg;base64,private-screenshot',
+            text: 'Selected chart',
+            section: 'Results',
+            source: 'screenshot',
+          },
+        },
+      ],
+    };
 
     await archive.save(context);
 
     expect(JSON.stringify(storage.values)).toContain('Question');
+    expect(JSON.stringify(storage.values)).toContain('Selected chart');
     expect(JSON.stringify(storage.values)).not.toContain('"article"');
     expect(JSON.stringify(storage.values)).not.toContain('"focus"');
-    await expect(archive.load(context.url)).resolves.toEqual(context.messages);
+    expect(JSON.stringify(storage.values)).not.toContain('private-screenshot');
+    await expect(archive.load(context.url)).resolves.toEqual([
+      {
+        ...context.messages[0],
+        reference: {
+          type: 'region',
+          text: 'Selected chart',
+          section: 'Results',
+          source: 'screenshot',
+        },
+      },
+    ]);
   });
 
   it('can clear every retained conversation', async () => {
