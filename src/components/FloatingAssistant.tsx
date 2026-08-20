@@ -26,6 +26,10 @@ import {
 
 import type { PageContext } from '../core/types.ts';
 import { ArticleDiagnosticsPanel } from './ArticleDiagnosticsPanel.tsx';
+import {
+  AssistantMarkdown,
+  MessageReferenceCard,
+} from './MessageContent.tsx';
 import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
 
 export const FLOATING_ASSISTANT_OPEN_EVENT = 'context-reader:open';
@@ -1137,12 +1141,16 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
                 key={message.id}
               >
                 <span>{messageAuthor(message)}</span>
-                <p aria-busy={isStreaming || undefined}>
-                  {shownText}
-                  {isStreaming && (
-                    <span className="cr-stream-caret" aria-hidden="true" />
-                  )}
-                </p>
+                <MessageReferenceCard reference={message.reference} />
+                {message.role === 'assistant' ? (
+                  <AssistantMarkdown
+                    content={shownText}
+                    busy={isStreaming}
+                    caretClassName="cr-stream-caret"
+                  />
+                ) : (
+                  <p className="message-plain">{shownText}</p>
+                )}
               </li>
             );
           })}

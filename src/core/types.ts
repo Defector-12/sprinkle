@@ -126,6 +126,11 @@ export interface RegionFocus {
 
 export type FocusContext = TextFocus | ImageFocus | RegionFocus;
 
+export type MessageReference =
+  | TextFocus
+  | (Omit<ImageFocus, 'imageUrl'> & { imageUrl?: string })
+  | (Omit<RegionFocus, 'imageUrl'> & { imageUrl?: string });
+
 export type AnswerModel = 'deepseek' | 'doubao';
 
 export interface ChatMessage {
@@ -133,6 +138,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   createdAt: number;
+  reference?: MessageReference;
   answeredBy?: AnswerModel;
   error?: boolean;
 }

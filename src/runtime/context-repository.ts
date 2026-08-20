@@ -82,6 +82,15 @@ function isArchivedConversation(value: unknown): value is ArchivedConversation {
   );
 }
 
+function archiveMessage(message: ChatMessage): ChatMessage {
+  const reference = message.reference;
+  if (!reference || reference.type === 'text' || !reference.imageUrl) {
+    return message;
+  }
+  const { imageUrl: _imageUrl, ...metadata } = reference;
+  return { ...message, reference: metadata };
+}
+
 export class ConversationArchive {
   constructor(private readonly storage: StorageArea) {}
 
@@ -89,7 +98,7 @@ export class ConversationArchive {
     const conversation: ArchivedConversation = {
       normalizedUrl: context.normalizedUrl,
       title: context.title,
-      messages: context.messages,
+      messages: context.messages.map(archiveMessage),
       updatedAt: Date.now(),
     };
     await this.storage.set({

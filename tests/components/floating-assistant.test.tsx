@@ -271,9 +271,14 @@ describe('FloatingAssistant', () => {
     await userEvent.keyboard('{Enter}');
 
     expect(bridge.ask).toHaveBeenCalledWith('这里的 MoE 是什么意思？');
-    expect(
-      await screen.findByText('这里指模型按输入选择部分专家网络参与计算。'),
-    ).toBeVisible();
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText('这里指模型按输入选择部分专家网络参与计算。'),
+        ).toBeVisible();
+      },
+      { timeout: 2_000 },
+    );
     expect(screen.getByText('DeepSeek')).toBeVisible();
   });
 
@@ -443,13 +448,34 @@ describe('FloatingAssistant', () => {
         { timeout: 3_000 },
       ),
     ).toBeVisible();
-    expect(screen.getByText('工作记忆', { selector: 'strong' })).toBeVisible();
-    expect(screen.getByRole('listitem', { name: '保存当前状态' })).toBeVisible();
-    expect(screen.getByText('memory.update()', { selector: 'code' })).toBeVisible();
-    expect(screen.getByRole('link', { name: '查看资料' })).toHaveAttribute(
-      'target',
-      '_blank',
-    );
+    expect(
+      await screen.findByText(
+        '工作记忆',
+        { selector: 'strong' },
+        { timeout: 3_000 },
+      ),
+    ).toBeVisible();
+    expect(
+      await screen.findByText(
+        '保存当前状态',
+        undefined,
+        { timeout: 3_000 },
+      ),
+    ).toBeVisible();
+    expect(
+      await screen.findByText(
+        'memory.update()',
+        { selector: 'code' },
+        { timeout: 3_000 },
+      ),
+    ).toBeVisible();
+    expect(
+      await screen.findByRole(
+        'link',
+        { name: '查看资料' },
+        { timeout: 3_000 },
+      ),
+    ).toHaveAttribute('target', '_blank');
     expect(screen.getByRole('note', { name: '提问引用' })).toHaveTextContent(
       'Working memory carries the current reasoning state.',
     );

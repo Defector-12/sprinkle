@@ -248,13 +248,15 @@ describe('StudyWorkspace', () => {
     expect(
       await screen.findByRole('heading', { name: '指标对比', level: 3 }),
     ).toBeVisible();
-    expect(screen.getByRole('table')).toHaveTextContent('Accuracy92%');
-    expect(
-      screen.getByRole('img', { name: '模型指标对比图' }),
-    ).toHaveAttribute('src', 'data:image/png;base64,chart');
-    expect(screen.getByRole('note', { name: '提问引用' })).toHaveTextContent(
-      'Benchmarks',
+    expect(screen.getByText('Accuracy').closest('table')).toHaveTextContent(
+      'Accuracy92%',
     );
+    const reference = screen.getByRole('note', { name: '提问引用' });
+    expect(reference.querySelector('img')).toHaveAttribute(
+      'src',
+      'data:image/png;base64,chart',
+    );
+    expect(reference).toHaveTextContent('Benchmarks');
   });
 
   it('navigates from the generated table of contents to a document heading', async () => {

@@ -4,6 +4,8 @@
  * pre-emit critique: P5 H4 E4 S5 R5 V4
  */
 
+@import "./message-content.css";
+
 :host {
   all: initial;
   --cr-color-ink: oklch(24% 0.015 70);
@@ -688,7 +690,8 @@ textarea:disabled {
   font-weight: 650;
 }
 
-.cr-message > p {
+.cr-message > .message-plain,
+.cr-message > .message-markdown {
   margin: 0;
   overflow-wrap: anywhere;
   font-size: 13px;
@@ -701,13 +704,29 @@ textarea:disabled {
   justify-items: end;
 }
 
-.cr-message--user > p {
+.cr-message--user > .message-plain {
   max-width: 88%;
   border-radius: var(--cr-radius-md) var(--cr-radius-sm)
     var(--cr-radius-md) var(--cr-radius-md);
   background: var(--cr-color-ink);
   color: var(--cr-color-surface);
   padding: var(--cr-space-2) var(--cr-space-3);
+}
+
+.cr-message .message-reference {
+  --message-reference-border: var(--cr-color-border);
+  --message-reference-bg: var(--cr-color-surface-muted);
+  --message-reference-color: var(--cr-color-ink-muted);
+  --message-reference-media-bg: var(--cr-color-surface);
+}
+
+.cr-message--user .message-reference {
+  justify-self: end;
+}
+
+.cr-message--assistant > .message-markdown {
+  --message-link-color: var(--cr-color-accent-hover);
+  color: var(--cr-color-ink);
 }
 
 .cr-message--assistant {

@@ -1,4 +1,15 @@
-import type { ChatMessage, PageContext } from './types.ts';
+import type {
+  ChatMessage,
+  FocusContext,
+  MessageReference,
+  PageContext,
+} from './types.ts';
+
+export function snapshotMessageReference(
+  focus: FocusContext | null,
+): MessageReference | undefined {
+  return focus ? { ...focus } : undefined;
+}
 
 export function completeQuestionTurn(
   answeringContext: PageContext,

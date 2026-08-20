@@ -72,6 +72,8 @@ Floating Assistant
 - 表格使用原生语义表格安全重建；公式使用白名单 MathML，缺失 MathML 时回退为 TeX 文本。
 - 右侧复用后台问答编排、DeepSeek/Doubao 路由、模型标签和消息归档。
 - 新回答在客户端逐字揭示，并遵循 `prefers-reduced-motion`。
+- 助手消息通过 `react-markdown` 与 `remark-gfm` 渲染；原始 HTML 被忽略，外部链接使用独立标签页打开。
+- 用户消息保存发送瞬间的 `MessageReference`。会话内图片引用保留预览，长期归档仅保留类型、章节和说明，不持久化截图数据。
 - 悬浮窗与工作台共享输入体验：内容驱动高度、发送后跟随消息末端、可切换全空间编辑模式。
 - 普通模式下 Enter 发送、Shift+Enter 换行；全空间编辑模式下 Enter 始终换行，只能通过发送按钮提交。
 - 划词后在选区附近提供快捷提问；点图模式直接构造 `FocusContext`；区域引用先截取当前工作台可见区域，再写入临时上下文。

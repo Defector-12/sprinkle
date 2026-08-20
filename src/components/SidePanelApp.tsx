@@ -10,6 +10,10 @@ import {
 import { useEffect, useRef, useState } from 'react';
 
 import type { PageContext } from '../core/types.ts';
+import {
+  AssistantMarkdown,
+  MessageReferenceCard,
+} from './MessageContent.tsx';
 
 export interface ExtensionBridge {
   getActiveContext(): Promise<PageContext>;
@@ -137,7 +141,12 @@ function MessageList({ context }: { context: PageContext }) {
           key={message.id}
         >
           <span className="message__role">{messageAuthor(message)}</span>
-          <p>{message.content}</p>
+          <MessageReferenceCard reference={message.reference} />
+          {message.role === 'assistant' ? (
+            <AssistantMarkdown content={message.content} />
+          ) : (
+            <p className="message-plain">{message.content}</p>
+          )}
         </li>
       ))}
     </ol>

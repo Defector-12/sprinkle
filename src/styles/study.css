@@ -1,3 +1,5 @@
+@import "./message-content.css";
+
 :root {
   --study-ink: oklch(23% 0.017 67);
   --study-muted: oklch(49% 0.02 67);
@@ -601,7 +603,8 @@ textarea:focus-visible,
   letter-spacing: 0.08em;
 }
 
-.study-message > p {
+.study-message > .message-plain,
+.study-message > .message-markdown {
   margin: 0;
   font-size: 14px;
   line-height: 1.75;
@@ -618,12 +621,27 @@ textarea:focus-visible,
   text-align: right;
 }
 
-.study-message--user > p {
+.study-message--user > .message-plain {
   border-radius: 14px 3px 14px 14px;
   background: var(--study-ink);
   color: var(--study-paper);
   padding: 10px 14px;
   overflow-wrap: anywhere;
+}
+
+.study-message .message-reference {
+  --message-reference-border: var(--study-line);
+  --message-reference-bg: var(--study-paper);
+  --message-reference-color: var(--study-muted);
+  --message-reference-media-bg: var(--study-accent-soft);
+}
+
+.study-message--user .message-reference {
+  margin-left: auto;
+}
+
+.study-message--assistant > .message-markdown {
+  --message-link-color: var(--study-accent-dark);
 }
 
 .study-message--assistant {

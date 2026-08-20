@@ -2,7 +2,10 @@ import { browser, type Browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
 
 import { ContextRegistry } from '../src/core/context-registry.ts';
-import { completeQuestionTurn } from '../src/core/conversation-turn.ts';
+import {
+  completeQuestionTurn,
+  snapshotMessageReference,
+} from '../src/core/conversation-turn.ts';
 import { buildModelRequest } from '../src/core/model-request.ts';
 import {
   createArticleChunks,
@@ -13,6 +16,7 @@ import type {
   ArticleDocument,
   ChatMessage,
   FocusContext,
+  MessageReference,
   PageContext,
 } from '../src/core/types.ts';
 import {
@@ -183,12 +187,14 @@ function message(
   role: ChatMessage['role'],
   content: string,
   answeredBy?: AnswerModel,
+  reference?: MessageReference,
 ): ChatMessage {
   return {
     id: crypto.randomUUID(),
     role,
     content,
     createdAt: Date.now(),
+    ...(reference ? { reference } : {}),
     ...(answeredBy ? { answeredBy } : {}),
   };
 }
@@ -231,7 +237,15 @@ async function askPage(
   const withQuestion: PageContext = {
     ...current,
     status: 'answering',
-    messages: [...current.messages, message('user', question)],
+    messages: [
+      ...current.messages,
+      message(
+        'user',
+        question,
+        undefined,
+        snapshotMessageReference(current.focus),
+      ),
+    ],
     updatedAt: Date.now(),
   };
   await contexts.save(withQuestion);

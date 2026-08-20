@@ -30,6 +30,10 @@ import type {
 } from '../core/types.ts';
 import { sanitizeMathMl } from '../core/mathml.ts';
 import type { StudyCaptureRect } from '../runtime/messages.ts';
+import {
+  AssistantMarkdown,
+  MessageReferenceCard,
+} from './MessageContent.tsx';
 import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
 
 export interface StudyWorkspaceBridgeContract {
@@ -899,22 +903,23 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
               className={`study-message study-message--${message.role}`}
             >
               <span>{messageAuthor(message)}</span>
-              <p
-                aria-busy={
-                  streamingTarget?.id === message.id &&
-                  revealedCount < message.content.length
-                    ? true
-                    : undefined
-                }
-              >
-                {streamingTarget?.id === message.id
-                  ? message.content.slice(0, revealedCount)
-                  : message.content}
-                {streamingTarget?.id === message.id &&
-                  revealedCount < message.content.length && (
-                    <span className="study-stream-caret" aria-hidden="true" />
-                  )}
-              </p>
+              <MessageReferenceCard reference={message.reference} />
+              {message.role === 'assistant' ? (
+                <AssistantMarkdown
+                  content={
+                    streamingTarget?.id === message.id
+                      ? message.content.slice(0, revealedCount)
+                      : message.content
+                  }
+                  busy={
+                    streamingTarget?.id === message.id &&
+                    revealedCount < message.content.length
+                  }
+                  caretClassName="study-stream-caret"
+                />
+              ) : (
+                <p className="message-plain">{message.content}</p>
+              )}
             </li>
           ))}
           <li
