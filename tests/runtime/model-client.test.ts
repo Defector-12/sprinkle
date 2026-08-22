@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ModelClientError,
@@ -31,6 +31,10 @@ const imageRequest: ModelRequest = {
 };
 
 describe('OpenAiCompatibleModelClient', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('fails clearly while the implementation-side model config is empty', async () => {
     const client = new OpenAiCompatibleModelClient(
       { endpoint: '', model: '' },
@@ -60,6 +64,34 @@ describe('OpenAiCompatibleModelClient', () => {
       }),
     );
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('aborts a model request after the configured timeout', async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn(
+      (_input: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        }),
+    );
+    const client = new OpenAiCompatibleModelClient(
+      {
+        endpoint: 'https://api.example.com/chat/completions',
+        model: 'vision-model',
+        timeoutMs: 100,
+      },
+      fetcher,
+    );
+
+    const completion = client.complete('secret', request);
+    const rejection = expect(completion).rejects.toEqual(
+      expect.objectContaining({ code: 'REQUEST_TIMEOUT' }),
+    );
+    await vi.advanceTimersByTimeAsync(100);
+
+    await rejection;
   });
 
   it('sends one fixed model request and returns assistant text', async () => {

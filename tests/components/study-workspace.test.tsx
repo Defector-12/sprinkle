@@ -501,6 +501,49 @@ describe('StudyWorkspace', () => {
     );
   });
 
+  it('does not reuse a quote after the browser selection is cleared', async () => {
+    const bridge = createBridge();
+    const { container } = render(<StudyWorkspace bridge={bridge} />);
+    const selectedNode = (
+      await screen.findByText(
+        'Working memory carries the current reasoning state.',
+      )
+    ).firstChild;
+    let selection = {
+      isCollapsed: false,
+      rangeCount: 1,
+      toString: () => 'Working memory',
+      anchorNode: selectedNode,
+      getRangeAt: () => ({
+        getBoundingClientRect: () => ({
+          left: 20,
+          bottom: 40,
+          width: 100,
+        }),
+      }),
+    } as unknown as Selection;
+    vi.spyOn(window, 'getSelection').mockImplementation(() => selection);
+    const article = container.querySelector('.study-document');
+    expect(article).not.toBeNull();
+
+    fireEvent.mouseUp(article!);
+    selection = {
+      isCollapsed: true,
+      rangeCount: 0,
+      toString: () => '',
+      anchorNode: null,
+    } as unknown as Selection;
+    fireEvent.mouseUp(article!);
+    await userEvent.click(
+      screen.getByRole('button', { name: '引用选中文字' }),
+    );
+
+    expect(bridge.setTextFocus).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '请先在左侧资料中选择一段文字',
+    );
+  });
+
   it('continues asking against the same page context', async () => {
     const bridge = createBridge();
     render(<StudyWorkspace bridge={bridge} />);

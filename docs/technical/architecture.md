@@ -45,6 +45,7 @@ Floating Assistant
 - 悬浮球可拖动；展开后的对话卡片可通过标题区移动位置，并通过持续可见的底角缩放柄或键盘调整整体尺寸。
 - 基于 `visualViewport` 约束悬浮球和卡片，浏览器缩放后自动回收到可见区域。
 - 通过 Shadow DOM 隔离网页样式，并阻止交互事件冒泡到宿主页面。
+- 工具栏与悬浮助手通过 isolated world 内的私有事件通道通信，网页脚本不能伪造激活事件。
 - 不直接访问 API Key，也不直接请求模型。
 
 ### Content Script
@@ -53,12 +54,14 @@ Floating Assistant
 - 在 `document_idle` 阶段挂载休眠的悬浮助手，但不请求页面解析。
 - 只有已启用页面才开放轻量文字快捷入口。
 - 图片点选、双击引用和区域框选只在页面启用后生效，捕获结果写入临时页面上下文。
+- 截图前后校验活动标签页身份，并按 `visualViewport` 映射缩放后的裁剪坐标。
 - 将选择结果发送给 Background，不持久化数据。
 
 ### Background Service Worker
 
 - 是页面上下文、模型请求和存储清理的唯一编排入口。
 - 优先根据消息发送者识别页面，避免标签切换时串用活动标签页。
+- 异步解析和回答提交前重新校验 `tabId + URL`，过期操作不会覆盖新页面状态。
 - 从 Content Script 获取页面结构与选择结果。
 - 从扩展本地存储读取 API Key，并直接请求模型。
 - 监听标签页关闭事件并清除对应临时上下文。
@@ -72,7 +75,7 @@ Floating Assistant
 - 表格使用原生语义表格安全重建；公式使用白名单 MathML，缺失 MathML 时回退为 TeX 文本。
 - 右侧复用后台问答编排、DeepSeek 模型标签和消息归档。
 - 新回答在客户端逐字揭示，并遵循 `prefers-reduced-motion`。
-- 助手消息通过 `react-markdown` 与 `remark-gfm` 渲染；原始 HTML 被忽略，外部链接使用独立标签页打开。
+- 助手消息通过 `react-markdown` 与 `remark-gfm` 渲染；原始 HTML 与远程图片被忽略，外部链接使用独立标签页打开。
 - 用户消息保存发送瞬间的 `MessageReference`。会话内图片引用保留预览，长期归档仅保留类型、章节和说明，不持久化截图数据。
 - 悬浮窗与工作台共享输入体验：内容驱动高度、发送后跟随消息末端、可切换全空间编辑模式。
 - 普通模式下 Enter 发送、Shift+Enter 换行；全空间编辑模式下 Enter 始终换行，只能通过发送按钮提交。
@@ -214,7 +217,7 @@ VITE_MODEL_ID
 }
 ```
 
-模型固定为 `deepseek-v4-flash-vision-exp`。图片使用 DeepSeek 原生支持的 `image_url` 内容块，可承载当前截图生成的 JPEG/PNG data URL；纯文本沿用字符串内容。系统消息和历史助手消息不携带图片，符合 DeepSeek 视觉接口限制。模型未配置、API Key 缺失、网络错误、HTTP 错误和无效响应均转化为明确的产品错误。
+模型固定为 `deepseek-v4-flash-vision-exp`。图片使用 DeepSeek 原生支持的 `image_url` 内容块，可承载当前截图生成的 JPEG/PNG data URL；纯文本沿用字符串内容。固定策略放在 system 消息中，不受信任的网页资料放在 user 消息中。请求默认 45 秒超时；模型未配置、API Key 缺失、超时、网络错误、HTTP 错误和无效响应均转化为明确的产品错误。
 
 ## 7. 存储
 

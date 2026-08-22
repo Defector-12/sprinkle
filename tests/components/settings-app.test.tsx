@@ -51,4 +51,28 @@ describe('SettingsApp', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('设置已保存');
     expect(screen.getByRole('status')).not.toHaveTextContent('deepseek-key');
   });
+
+  it('locks editable settings while a save is pending', async () => {
+    let finishSave: (() => void) | undefined;
+    const store = createStore();
+    vi.mocked(store.save).mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishSave = resolve;
+      }),
+    );
+    render(<SettingsApp store={store} />);
+    const apiKey = await screen.findByLabelText('DeepSeek API Key');
+    const retention = screen.getByLabelText('保留对话记录');
+
+    await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+    expect(apiKey).toBeDisabled();
+    expect(retention).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: '清除全部本地对话' }),
+    ).toBeDisabled();
+
+    finishSave?.();
+    expect(await screen.findByRole('status')).toHaveTextContent('设置已保存');
+  });
 });

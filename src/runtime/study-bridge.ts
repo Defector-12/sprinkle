@@ -10,23 +10,18 @@ import { normalizePageUrl } from '../core/url.ts';
 import { extensionUrl } from './extension-url.ts';
 import {
   isContextChangedEvent,
-  type ExtensionRequest,
-  type RuntimeResult,
   type StudyCaptureRect,
 } from './messages.ts';
+import { sendRuntimeRequest } from './runtime-client.ts';
+import {
+  captureVisibleTabForSender,
+  currentViewportMetrics,
+  mapViewportRectToImage,
+} from './screenshot.ts';
 
 export interface StudyTarget {
   tabId: number;
   url: string;
-}
-
-async function send<T>(message: ExtensionRequest): Promise<T> {
-  const response = (await browser.runtime.sendMessage(
-    message,
-  )) as RuntimeResult<T>;
-  if (!response) throw new Error('扩展后台没有响应');
-  if (!response.ok) throw new Error(response.error);
-  return response.data;
 }
 
 function loadImage(source: string): Promise<HTMLImageElement> {
@@ -52,14 +47,14 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
   constructor(private readonly target: StudyTarget) {}
 
   initialize(): Promise<PageContext> {
-    return send<PageContext>({
+    return sendRuntimeRequest<PageContext>({
       type: 'study:context:get',
       ...this.target,
     });
   }
 
   ask(question: string): Promise<PageContext> {
-    return send<PageContext>({
+    return sendRuntimeRequest<PageContext>({
       type: 'study:chat:ask',
       ...this.target,
       question,
@@ -67,7 +62,7 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
   }
 
   setTextFocus(text: string, section: string): Promise<PageContext> {
-    return send<PageContext>({
+    return sendRuntimeRequest<PageContext>({
       type: 'study:focus:set',
       ...this.target,
       focus: {
@@ -79,7 +74,7 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
   }
 
   setImageFocus(focus: ImageFocus): Promise<PageContext> {
-    return send<PageContext>({
+    return sendRuntimeRequest<PageContext>({
       type: 'study:focus:set',
       ...this.target,
       focus,
@@ -87,7 +82,7 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
   }
 
   setRegionFocus(focus: RegionFocus): Promise<PageContext> {
-    return send<PageContext>({
+    return sendRuntimeRequest<PageContext>({
       type: 'study:focus:set',
       ...this.target,
       focus,
@@ -95,7 +90,7 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
   }
 
   clearFocus(): Promise<PageContext> {
-    return send<PageContext>({
+    return sendRuntimeRequest<PageContext>({
       type: 'study:focus:clear',
       ...this.target,
     });
@@ -106,27 +101,37 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
     if (currentWindow.id == null) {
       throw new Error('无法识别学习工作台所在窗口');
     }
-    const screenshot = await browser.tabs.captureVisibleTab(currentWindow.id, {
-      format: 'jpeg',
-      quality: 90,
+    const [activeTab] = await browser.tabs.query({
+      active: true,
+      windowId: currentWindow.id,
     });
+    if (activeTab?.id == null) {
+      throw new Error('无法识别学习工作台标签页');
+    }
+    const screenshot = await captureVisibleTabForSender(
+      activeTab.id,
+      currentWindow.id,
+      { format: 'jpeg', quality: 90 },
+    );
     const source = await loadImage(screenshot);
-    const scaleX = source.naturalWidth / window.innerWidth;
-    const scaleY = source.naturalHeight / window.innerHeight;
-    const sourceWidth = Math.max(1, Math.round(rect.width * scaleX));
-    const sourceHeight = Math.max(1, Math.round(rect.height * scaleY));
-    const outputScale = Math.min(1, 1600 / sourceWidth, 1600 / sourceHeight);
+    const crop = mapViewportRectToImage(
+      rect,
+      source.naturalWidth,
+      source.naturalHeight,
+      currentViewportMetrics(),
+    );
+    const outputScale = Math.min(1, 1600 / crop.width, 1600 / crop.height);
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(sourceWidth * outputScale));
-    canvas.height = Math.max(1, Math.round(sourceHeight * outputScale));
+    canvas.width = Math.max(1, Math.round(crop.width * outputScale));
+    canvas.height = Math.max(1, Math.round(crop.height * outputScale));
     const context = canvas.getContext('2d');
     if (!context) throw new Error('浏览器不支持截图裁剪');
     context.drawImage(
       source,
-      Math.round(rect.left * scaleX),
-      Math.round(rect.top * scaleY),
-      sourceWidth,
-      sourceHeight,
+      crop.x,
+      crop.y,
+      crop.width,
+      crop.height,
       0,
       0,
       canvas.width,
@@ -136,7 +141,7 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
   }
 
   async openSource(): Promise<void> {
-    await send<void>({
+    await sendRuntimeRequest<void>({
       type: 'study:source:open',
       ...this.target,
     });

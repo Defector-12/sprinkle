@@ -41,7 +41,7 @@ Context Reader 是一个 Chrome / Edge Manifest V3 浏览器插件。普通网�
 
 ## 本地开发
 
-要求 Node.js 20.12+ 和 pnpm。
+要求 Node.js 22.13+ 和 pnpm。
 
 ```bash
 pnpm install
@@ -98,7 +98,6 @@ entrypoints/
   background.ts       后台上下文与模型编排
   content.ts          页面解析、选词入口与悬浮助手挂载
   study/              全页双栏学习工作台
-  sidepanel/          保留的开发回退界面，不再由工具栏打开
   options/            API Key 与隐私设置
 src/
   components/         React 界面

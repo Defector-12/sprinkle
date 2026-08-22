@@ -40,12 +40,7 @@ describe('settings store', () => {
       apiKey: 'deepseek-key',
       retainConversations: true,
     });
-    expect(set).toHaveBeenCalledWith({
-      'context-reader:settings': {
-        apiKey: 'deepseek-key',
-        retainConversations: true,
-      },
-    });
+    expect(set).not.toHaveBeenCalled();
   });
 
   it('stores the DeepSeek key only in extension local storage', async () => {

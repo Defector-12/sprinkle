@@ -2,7 +2,14 @@ import { Image as ImageIcon, Quote } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-import type { MessageReference } from '../core/types.ts';
+import type { ChatMessage, MessageReference } from '../core/types.ts';
+
+export function messageAuthor(message: ChatMessage): string {
+  if (message.role === 'user') return '你';
+  if (message.answeredBy === 'deepseek') return 'DeepSeek';
+  if (message.answeredBy === 'doubao') return 'Doubao';
+  return '助手';
+}
 
 export function AssistantMarkdown({
   content,
@@ -22,6 +29,10 @@ export function AssistantMarkdown({
           a: ({ node: _node, ...props }) => (
             <a {...props} target="_blank" rel="noreferrer noopener" />
           ),
+          img: ({ node: _node, alt }) =>
+            alt ? (
+              <span className="message-markdown__image-alt">{alt}</span>
+            ) : null,
           table: ({ node: _node, ...props }) => (
             <div className="message-markdown__table">
               <table {...props} />

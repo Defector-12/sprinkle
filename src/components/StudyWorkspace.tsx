@@ -32,6 +32,7 @@ import { sanitizeMathMl } from '../core/mathml.ts';
 import type { StudyCaptureRect } from '../runtime/messages.ts';
 import {
   AssistantMarkdown,
+  messageAuthor,
   MessageReferenceCard,
 } from './MessageContent.tsx';
 import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
@@ -79,15 +80,6 @@ const STREAM_STEP = 2;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
-}
-
-function messageAuthor(
-  message: PageContext['messages'][number],
-): string {
-  if (message.role === 'user') return '你';
-  if (message.answeredBy === 'deepseek') return 'DeepSeek';
-  if (message.answeredBy === 'doubao') return 'Doubao';
-  return '助手';
 }
 
 function headingId(block: ArticleBlock): string {
@@ -445,6 +437,7 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     setContext(
       await bridge.setTextFocus(quote.text.slice(0, 4_000), quote.section),
     );
+    setSelectedQuote(null);
     setSelectionAction(null);
     inputRef.current?.focus();
   }
@@ -650,6 +643,7 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
           onMouseUp={() => {
             const quote = quoteFromSelection();
             if (!quote) {
+              setSelectedQuote(null);
               setSelectionAction(null);
               return;
             }

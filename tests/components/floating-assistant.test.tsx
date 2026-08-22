@@ -7,6 +7,7 @@ import {
   type FloatingAssistantBridge,
 } from '../../src/components/FloatingAssistant.tsx';
 import type { PageContext } from '../../src/core/types.ts';
+import { publishAssistantOpen } from '../../src/runtime/assistant-events.ts';
 
 const readyContext: PageContext = {
   key: '7:https://example.com/post',
@@ -111,7 +112,11 @@ describe('FloatingAssistant', () => {
     act(() => {
       window.dispatchEvent(new CustomEvent('context-reader:open'));
     });
+    expect(bridge.activate).not.toHaveBeenCalled();
 
+    act(() => {
+      publishAssistantOpen();
+    });
     expect(bridge.activate).toHaveBeenCalledOnce();
     expect(
       await screen.findByRole('dialog', { name: 'Context Reader 对话' }),
@@ -164,11 +169,7 @@ describe('FloatingAssistant', () => {
     render(<FloatingAssistant bridge={bridge} />);
 
     act(() => {
-      window.dispatchEvent(
-        new CustomEvent('context-reader:open', {
-          detail: { activate: false },
-        }),
-      );
+      publishAssistantOpen({ activate: false });
     });
 
     expect(
@@ -486,7 +487,7 @@ describe('FloatingAssistant', () => {
     await waitFor(() => expect(bridge.initialize).toHaveBeenCalledOnce());
 
     act(() => {
-      window.dispatchEvent(new CustomEvent('context-reader:open'));
+      publishAssistantOpen();
     });
 
     expect(await screen.findByRole('status')).toHaveTextContent(
@@ -654,7 +655,7 @@ describe('FloatingAssistant', () => {
     pointer('pointerup', 200, midY);
 
     act(() => {
-      window.dispatchEvent(new CustomEvent('context-reader:open'));
+      publishAssistantOpen();
     });
 
     const dialog = await screen.findByRole('dialog', {

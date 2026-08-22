@@ -131,7 +131,7 @@ export type MessageReference =
   | (Omit<ImageFocus, 'imageUrl'> & { imageUrl?: string })
   | (Omit<RegionFocus, 'imageUrl'> & { imageUrl?: string });
 
-export type AnswerModel = 'deepseek' | 'doubao';
+export type AnswerModel = 'deepseek' | 'doubao'; // Doubao remains for archived conversations.
 
 export interface ChatMessage {
   id: string;

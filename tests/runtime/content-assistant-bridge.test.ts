@@ -19,11 +19,14 @@ vi.mock('wxt/browser', () => ({
 }));
 
 import { ContentAssistantBridge } from '../../src/runtime/content-assistant-bridge.ts';
+import type { PageContext } from '../../src/core/types.ts';
 
 describe('ContentAssistantBridge', () => {
   beforeEach(() => {
     sendMessage.mockReset();
     openOptionsPage.mockReset();
+    addListener.mockReset();
+    removeListener.mockReset();
   });
 
   it('opens settings through the background instead of the unavailable content API', async () => {
@@ -95,5 +98,44 @@ describe('ContentAssistantBridge', () => {
     await expect(new ContentAssistantBridge().openSettings()).rejects.toThrow(
       '无法打开设置',
     );
+  });
+
+  it('ignores context updates for a previous page in the same tab', () => {
+    const bridge = new ContentAssistantBridge();
+    const listener = vi.fn();
+    const unsubscribe = bridge.subscribe(listener);
+    const onMessage = addListener.mock.calls[0]?.[0] as (
+      message: unknown,
+    ) => void;
+    const context = {
+      key: '7:https://example.com/previous',
+      tabId: 7,
+      url: 'https://example.com/previous',
+      normalizedUrl: 'https://example.com/previous',
+      title: 'Previous page',
+      status: 'ready',
+      article: null,
+      focus: null,
+      messages: [],
+      warning: null,
+      updatedAt: 1,
+    } satisfies PageContext;
+
+    onMessage({ type: 'context:changed', context });
+    expect(listener).not.toHaveBeenCalled();
+
+    onMessage({
+      type: 'context:changed',
+      context: {
+        ...context,
+        key: `7:${location.href}`,
+        url: location.href,
+        normalizedUrl: location.href,
+      },
+    });
+    expect(listener).toHaveBeenCalledOnce();
+
+    unsubscribe();
+    expect(removeListener).toHaveBeenCalledWith(onMessage);
   });
 });

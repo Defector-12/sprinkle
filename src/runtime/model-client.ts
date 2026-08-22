@@ -3,6 +3,7 @@ import type { ModelRequest } from '../core/types.ts';
 export type ModelClientErrorCode =
   | 'MODEL_NOT_CONFIGURED'
   | 'API_KEY_MISSING'
+  | 'REQUEST_TIMEOUT'
   | 'PROVIDER_ERROR'
   | 'INVALID_RESPONSE'
   | 'NETWORK_ERROR';
@@ -21,7 +22,10 @@ export class ModelClientError extends Error {
 export interface ModelConfig {
   endpoint: string;
   model: string;
+  timeoutMs?: number;
 }
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
 
 type Fetcher = (
   input: string | URL | Request,
@@ -52,13 +56,15 @@ function assistantText(response: ProviderResponse): string | null {
   return text || null;
 }
 
-
 async function fetchJson<T>(
   fetcher: Fetcher,
   endpoint: string,
   apiKey: string,
   body: unknown,
+  timeoutMs: number,
 ): Promise<{ payload: T; response: Response }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
   try {
     response = await fetcher(endpoint, {
@@ -68,13 +74,22 @@ async function fetchJson<T>(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
   } catch (cause) {
+    if (controller.signal.aborted) {
+      throw new ModelClientError(
+        'REQUEST_TIMEOUT',
+        '模型服务响应超时，请稍后重试。',
+      );
+    }
     const detail = cause instanceof Error ? cause.message : String(cause);
     throw new ModelClientError(
       'NETWORK_ERROR',
       `无法连接模型服务，请检查网络后重试。（${detail}）`,
     );
+  } finally {
+    clearTimeout(timeout);
   }
 
   let payload = {} as T;
@@ -129,6 +144,7 @@ export class OpenAiCompatibleModelClient {
         messages: request.messages,
         stream: false,
       },
+      this.config.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     );
 
     if (!response.ok) {

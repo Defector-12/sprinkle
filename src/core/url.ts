@@ -12,7 +12,7 @@ function isTrackingParameter(name: string): boolean {
 
 export function normalizePageUrl(value: string): string {
   const url = new URL(value);
-  url.hash = '';
+  if (!/^#!?\//.test(url.hash)) url.hash = '';
 
   const meaningfulParameters = [...url.searchParams.entries()]
     .filter(([name]) => !isTrackingParameter(name.toLowerCase()))

@@ -25,19 +25,18 @@ import {
 } from 'react';
 
 import type { PageContext } from '../core/types.ts';
+import {
+  publishAssistantActive,
+  subscribeAssistantOpen,
+  type AssistantOpenDetail,
+} from '../runtime/assistant-events.ts';
 import { ArticleDiagnosticsPanel } from './ArticleDiagnosticsPanel.tsx';
 import {
   AssistantMarkdown,
+  messageAuthor,
   MessageReferenceCard,
 } from './MessageContent.tsx';
 import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
-
-export const FLOATING_ASSISTANT_OPEN_EVENT = 'context-reader:open';
-export const FLOATING_ASSISTANT_ACTIVE_EVENT = 'context-reader:active';
-
-export interface FloatingAssistantOpenDetail {
-  activate?: boolean;
-}
 
 export interface FloatingAssistantBridge {
   initialize(): Promise<PageContext>;
@@ -301,13 +300,6 @@ function statusLabel(context: PageContext | null): string {
   }
 }
 
-function messageAuthor(message: PageContext['messages'][number]): string {
-  if (message.role === 'user') return '你';
-  if (message.answeredBy === 'deepseek') return 'DeepSeek';
-  if (message.answeredBy === 'doubao') return 'Doubao';
-  return '助手';
-}
-
 interface StatusPanelProps {
   context: PageContext | null;
   hasApiKey: boolean | null;
@@ -523,6 +515,12 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     }
   }
 
+  function closeDialog() {
+    setShowDiagnostics(false);
+    setIsComposerMaximized(false);
+    setIsOpen(false);
+  }
+
   useEffect(() => {
     let active = true;
     void Promise.all([bridge.initialize(), bridge.hasApiKey()])
@@ -543,30 +541,25 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       setContext(nextContext);
       setIsVisible(nextContext.status !== 'unactivated');
     });
-    const openFromPage = (event: Event) => {
-      const detail = (event as CustomEvent<FloatingAssistantOpenDetail>).detail;
+    const openFromPage = (detail: AssistantOpenDetail) => {
       setIsVisible(true);
       setIsOpen(true);
       if (detail?.activate !== false) void activatePage();
       else void refreshApiKeyStatus();
     };
     const closeWithEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setShowDiagnostics(false);
-        setIsComposerMaximized(false);
-        setIsOpen(false);
-      }
+      if (event.key === 'Escape') closeDialog();
     };
     const refreshAfterSettings = () => void refreshApiKeyStatus();
 
-    window.addEventListener(FLOATING_ASSISTANT_OPEN_EVENT, openFromPage);
+    const unsubscribeOpen = subscribeAssistantOpen(openFromPage);
     window.addEventListener('keydown', closeWithEscape);
     window.addEventListener('focus', refreshAfterSettings);
 
     return () => {
       active = false;
       unsubscribe();
-      window.removeEventListener(FLOATING_ASSISTANT_OPEN_EVENT, openFromPage);
+      unsubscribeOpen();
       window.removeEventListener('keydown', closeWithEscape);
       window.removeEventListener('focus', refreshAfterSettings);
     };
@@ -575,9 +568,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   useEffect(() => {
     const enabled =
       isVisible && Boolean(context && context.status !== 'unactivated');
-    window.dispatchEvent(
-      new CustomEvent(FLOATING_ASSISTANT_ACTIVE_EVENT, { detail: enabled }),
-    );
+    publishAssistantActive(enabled);
   }, [context, isVisible]);
 
   useEffect(() => {
@@ -975,6 +966,9 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       }${isComposerMaximized ? ' cr-dialog--composer-maximized' : ''}`}
       role="dialog"
       aria-label="Context Reader 对话"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') closeDialog();
+      }}
       style={{
         ...layout.style,
         ...(isComposerMaximized && !layout.style.height
@@ -1034,11 +1028,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             className="cr-icon-button"
             type="button"
             aria-label="收起 Context Reader"
-            onClick={() => {
-              setShowDiagnostics(false);
-              setIsComposerMaximized(false);
-              setIsOpen(false);
-            }}
+            onClick={closeDialog}
           >
             <X size={18} aria-hidden="true" />
           </button>

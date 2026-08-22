@@ -3,32 +3,26 @@ import { createRoot, type Root } from 'react-dom/client';
 import { browser } from 'wxt/browser';
 import { defineContentScript } from 'wxt/utils/define-content-script';
 
-import {
-  FLOATING_ASSISTANT_ACTIVE_EVENT,
-  FLOATING_ASSISTANT_OPEN_EVENT,
-  FloatingAssistant,
-} from '../src/components/FloatingAssistant.tsx';
+import { FloatingAssistant } from '../src/components/FloatingAssistant.tsx';
 import { extractArticle } from '../src/core/article-extractor.ts';
 import type { FocusContext } from '../src/core/types.ts';
+import {
+  publishAssistantOpen,
+  subscribeAssistantActive,
+} from '../src/runtime/assistant-events.ts';
 import { ContentAssistantBridge } from '../src/runtime/content-assistant-bridge.ts';
-import type {
-  ContentRequest,
-  ExtensionRequest,
-  RuntimeResult,
-} from '../src/runtime/messages.ts';
+import type { ContentRequest } from '../src/runtime/messages.ts';
+import { sendRuntimeRequest } from '../src/runtime/runtime-client.ts';
+import {
+  currentViewportMetrics,
+  mapViewportRectToImage,
+} from '../src/runtime/screenshot.ts';
 import floatingAssistantCss from '../src/styles/floating-assistant.css?inline';
 
 const UI_ATTRIBUTE = 'data-context-reader-ui';
-
-async function sendRuntime<T>(request: ExtensionRequest): Promise<T> {
-  const response = (await browser.runtime.sendMessage(
-    request,
-  )) as RuntimeResult<T>;
-  if (!response?.ok) {
-    throw new Error(response?.error || '扩展后台没有响应');
-  }
-  return response.data;
-}
+const CONTENT_RUNTIME_KEY = '__contextReaderRuntimeMounted__';
+type RuntimeGlobal = typeof globalThis &
+  Partial<Record<typeof CONTENT_RUNTIME_KEY, boolean>>;
 
 function cleanText(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, ' ').trim();
@@ -137,35 +131,31 @@ function installTextSelection(openAssistant: () => void): () => void {
       section: sectionFor(selectedElement),
     };
     hide();
-    await sendRuntime({ type: 'focus:set', focus })
+    await sendRuntimeRequest({ type: 'focus:set', focus })
       .then(openAssistant)
       .catch(() => undefined);
   };
-  const onActiveChange = (event: Event) => {
-    enabled = Boolean((event as CustomEvent<boolean>).detail);
+  const onActiveChange = (active: boolean) => {
+    enabled = active;
     if (!enabled) hide();
   };
 
   document.addEventListener('mouseup', onMouseUp);
   document.addEventListener('scroll', hide, true);
-  window.addEventListener(FLOATING_ASSISTANT_ACTIVE_EVENT, onActiveChange);
+  const unsubscribeActive = subscribeAssistantActive(onActiveChange);
   button.addEventListener('click', onButtonClick);
 
   return () => {
     document.removeEventListener('mouseup', onMouseUp);
     document.removeEventListener('scroll', hide, true);
-    window.removeEventListener(FLOATING_ASSISTANT_ACTIVE_EVENT, onActiveChange);
+    unsubscribeActive();
     button.removeEventListener('click', onButtonClick);
     button.remove();
   };
 }
 
 function openFloatingAssistant(activate = false): void {
-  window.dispatchEvent(
-    new CustomEvent(FLOATING_ASSISTANT_OPEN_EVENT, {
-      detail: { activate },
-    }),
-  );
+  publishAssistantOpen({ activate });
 }
 
 interface MountedAssistant {
@@ -231,29 +221,19 @@ function loadImage(source: string): Promise<HTMLImageElement> {
 }
 
 async function cropVisibleScreenshot(rect: DOMRect): Promise<string> {
-  const screenshot = await sendRuntime<string>({ type: 'capture:visible' });
+  const screenshot = await sendRuntimeRequest<string>({
+    type: 'capture:visible',
+  });
   const source = await loadImage(screenshot);
-  const scaleX = source.naturalWidth / window.innerWidth;
-  const scaleY = source.naturalHeight / window.innerHeight;
-  const sourceLeft = Math.max(0, rect.left);
-  const sourceTop = Math.max(0, rect.top);
-  const visibleWidth = Math.min(
-    window.innerWidth - sourceLeft,
-    rect.width - Math.max(0, -rect.left),
+  const crop = mapViewportRectToImage(
+    rect,
+    source.naturalWidth,
+    source.naturalHeight,
+    currentViewportMetrics(),
   );
-  const visibleHeight = Math.min(
-    window.innerHeight - sourceTop,
-    rect.height - Math.max(0, -rect.top),
-  );
-  if (visibleWidth <= 0 || visibleHeight <= 0) {
-    throw new Error('选择区域不在当前可见页面内');
-  }
-
-  const sourceWidth = Math.max(1, Math.round(visibleWidth * scaleX));
-  const sourceHeight = Math.max(1, Math.round(visibleHeight * scaleY));
-  const outputScale = Math.min(1, 1600 / sourceWidth, 1600 / sourceHeight);
-  const width = Math.max(1, Math.round(sourceWidth * outputScale));
-  const height = Math.max(1, Math.round(sourceHeight * outputScale));
+  const outputScale = Math.min(1, 1600 / crop.width, 1600 / crop.height);
+  const width = Math.max(1, Math.round(crop.width * outputScale));
+  const height = Math.max(1, Math.round(crop.height * outputScale));
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -262,10 +242,10 @@ async function cropVisibleScreenshot(rect: DOMRect): Promise<string> {
 
   context.drawImage(
     source,
-    Math.round(sourceLeft * scaleX),
-    Math.round(sourceTop * scaleY),
-    sourceWidth,
-    sourceHeight,
+    crop.x,
+    crop.y,
+    crop.width,
+    crop.height,
     0,
     0,
     width,
@@ -325,7 +305,7 @@ async function quoteImage(
   const imageUrl = screenshot || originalUrl;
   if (!imageUrl) throw new Error('无法读取这张图片');
 
-  await sendRuntime({
+  await sendRuntimeRequest({
     type: 'focus:set',
     focus: {
       type: 'image',
@@ -391,8 +371,8 @@ function startImagePicker(openAssistant: () => void): void {
 
 function installImageDoubleClick(openAssistant: () => void): () => void {
   let enabled = false;
-  const onActiveChange = (event: Event) => {
-    enabled = Boolean((event as CustomEvent<boolean>).detail);
+  const onActiveChange = (active: boolean) => {
+    enabled = active;
   };
   const onDoubleClick = (event: MouseEvent) => {
     if (!enabled) return;
@@ -402,10 +382,10 @@ function installImageDoubleClick(openAssistant: () => void): () => void {
     if (image) void quoteImage(image, openAssistant).catch(() => undefined);
   };
 
-  window.addEventListener(FLOATING_ASSISTANT_ACTIVE_EVENT, onActiveChange);
+  const unsubscribeActive = subscribeAssistantActive(onActiveChange);
   document.addEventListener('dblclick', onDoubleClick, true);
   return () => {
-    window.removeEventListener(FLOATING_ASSISTANT_ACTIVE_EVENT, onActiveChange);
+    unsubscribeActive();
     document.removeEventListener('dblclick', onDoubleClick, true);
   };
 }
@@ -576,7 +556,7 @@ function startRegionPicker(openAssistant: () => void): void {
       source: 'screenshot',
     };
     showRegionPreview(imageUrl, () => {
-      return sendRuntime({ type: 'focus:set', focus })
+      return sendRuntimeRequest({ type: 'focus:set', focus })
         .then(openAssistant)
         .catch(() => undefined);
     });
@@ -588,6 +568,10 @@ export default defineContentScript({
   matches: ['http://*/*', 'https://*/*'],
   runAt: 'document_idle',
   main() {
+    const runtimeGlobal = globalThis as RuntimeGlobal;
+    if (runtimeGlobal[CONTENT_RUNTIME_KEY]) return;
+    runtimeGlobal[CONTENT_RUNTIME_KEY] = true;
+
     const onMessage = (request: ContentRequest) => {
       switch (request.type) {
         case 'page:extract':
@@ -613,17 +597,19 @@ export default defineContentScript({
       () => openFloatingAssistant(false),
     );
 
-    window.addEventListener(
-      'pagehide',
-      () => {
-        uninstallTextSelection();
-        uninstallImageDoubleClick();
-        browser.runtime.onMessage.removeListener(onMessage);
-        assistant.removeEventIsolation();
-        assistant.root.unmount();
-        assistant.host.remove();
-      },
-      { once: true },
-    );
+    const cleanup = () => {
+      uninstallTextSelection();
+      uninstallImageDoubleClick();
+      browser.runtime.onMessage.removeListener(onMessage);
+      assistant.removeEventIsolation();
+      assistant.root.unmount();
+      assistant.host.remove();
+      delete runtimeGlobal[CONTENT_RUNTIME_KEY];
+      window.removeEventListener('pagehide', onPageHide);
+    };
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (!event.persisted) cleanup();
+    };
+    window.addEventListener('pagehide', onPageHide);
   },
 });

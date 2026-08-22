@@ -109,7 +109,7 @@ export function SettingsApp({ store }: SettingsAppProps) {
                   }
                   autoComplete="off"
                   spellCheck={false}
-                  disabled={!loaded}
+                  disabled={!loaded || saving}
                   aria-describedby="api-key-help"
                 />
                 <button
@@ -162,7 +162,7 @@ export function SettingsApp({ store }: SettingsAppProps) {
                     retainConversations: event.target.checked,
                   }))
                 }
-                disabled={!loaded}
+                disabled={!loaded || saving}
               />
               <span aria-hidden="true" />
             </span>
@@ -172,6 +172,7 @@ export function SettingsApp({ store }: SettingsAppProps) {
             className="danger-button"
             type="button"
             onClick={() => void clearConversations()}
+            disabled={saving}
           >
             <Trash2 size={17} aria-hidden="true" />
             清除全部本地对话
