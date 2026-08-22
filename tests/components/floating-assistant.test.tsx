@@ -73,24 +73,15 @@ const partialContext: PageContext = {
   },
 };
 
-type VisionAssistantBridge = FloatingAssistantBridge & {
-  hasVisionApiKey(): Promise<boolean>;
-  startImagePicker(): Promise<void>;
-  startRegionPicker(): Promise<void>;
-  clearFocus(): Promise<PageContext>;
-  openStudy(): Promise<void>;
-};
-
 function createBridge(
   context: PageContext = readyContext,
-  overrides: Partial<VisionAssistantBridge> = {},
-): VisionAssistantBridge {
+  overrides: Partial<FloatingAssistantBridge> = {},
+): FloatingAssistantBridge {
   return {
     initialize: vi.fn().mockResolvedValue(context),
     activate: vi.fn().mockResolvedValue(readyContext),
     deactivate: vi.fn().mockResolvedValue(unactivatedContext),
     hasApiKey: vi.fn().mockResolvedValue(true),
-    hasVisionApiKey: vi.fn().mockResolvedValue(true),
     ask: vi.fn().mockResolvedValue(context),
     startImagePicker: vi.fn().mockResolvedValue(undefined),
     startRegionPicker: vi.fn().mockResolvedValue(undefined),
@@ -207,7 +198,7 @@ describe('FloatingAssistant', () => {
     expect(bridge.startRegionPicker).toHaveBeenCalledOnce();
   });
 
-  it('previews an image reference, explains Doubao routing, and can remove it', async () => {
+  it('previews an image reference, explains DeepSeek vision use, and can remove it', async () => {
     const imageContext: PageContext = {
       ...readyContext,
       focus: {
@@ -231,7 +222,7 @@ describe('FloatingAssistant', () => {
     ).toHaveAttribute('src', imageContext.focus?.type === 'image'
       ? imageContext.focus.imageUrl
       : '');
-    expect(screen.getByText('含图片，发送时使用 Doubao')).toBeVisible();
+    expect(screen.getByText('含图片，将使用 DeepSeek 视觉模型')).toBeVisible();
 
     await userEvent.click(
       screen.getByRole('button', { name: '移除图片引用' }),

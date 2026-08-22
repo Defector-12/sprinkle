@@ -11,7 +11,6 @@ export default defineConfig({
       'http://*/*',
       'https://*/*',
       'https://api.deepseek.com/*',
-      'https://ark.cn-beijing.volces.com/*',
     ],
     action: {
       default_title: '打开 Context Reader',

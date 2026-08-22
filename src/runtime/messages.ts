@@ -38,7 +38,6 @@ export type ExtensionRequest =
   | { type: 'focus:clear' }
   | { type: 'capture:visible' }
   | { type: 'settings:has-key' }
-  | { type: 'settings:has-vision-key' }
   | { type: 'settings:open' };
 
 export type ContentRequest =

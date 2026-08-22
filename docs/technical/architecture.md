@@ -70,7 +70,7 @@ Floating Assistant
 - 左侧根据 `ArticleDocument` 重建语义化阅读视图，并按提取顺序回填图片和图表，避免外站 `X-Frame-Options` 和 CSP 阻止 iframe。
 - 目录由已提取标题及其层级生成，点击后滚动到对应标题；原文中的锚点目录列表不会重复进入正文。
 - 表格使用原生语义表格安全重建；公式使用白名单 MathML，缺失 MathML 时回退为 TeX 文本。
-- 右侧复用后台问答编排、DeepSeek/Doubao 路由、模型标签和消息归档。
+- 右侧复用后台问答编排、DeepSeek 模型标签和消息归档。
 - 新回答在客户端逐字揭示，并遵循 `prefers-reduced-motion`。
 - 助手消息通过 `react-markdown` 与 `remark-gfm` 渲染；原始 HTML 被忽略，外部链接使用独立标签页打开。
 - 用户消息保存发送瞬间的 `MessageReference`。会话内图片引用保留预览，长期归档仅保留类型、章节和说明，不持久化截图数据。
@@ -202,11 +202,9 @@ article -> main -> [role="main"] -> body
 ```text
 VITE_MODEL_API_URL
 VITE_MODEL_ID
-VITE_VISION_MODEL_API_URL
-VITE_VISION_MODEL_ID
 ```
 
-用户设置分别包含 DeepSeek 与 Doubao API Key。文本请求使用 OpenAI-compatible Chat Completions：
+用户设置只包含 DeepSeek API Key。文字与图片请求统一使用 OpenAI-compatible Chat Completions：
 
 ```json
 {
@@ -216,7 +214,7 @@ VITE_VISION_MODEL_ID
 }
 ```
 
-当模型请求中包含 `image_url` 时，后台自动切换到 Doubao Ark Responses API，并将图片转换为 `input_image`、问题转换为 `input_text`。路由只依据请求内容，不提供手动模型选择，也不在失败后静默降级。模型未配置、对应 API Key 缺失、网络错误、HTTP 错误和无效响应均转化为明确的产品错误。
+模型固定为 `deepseek-v4-flash-vision-exp`。图片使用 DeepSeek 原生支持的 `image_url` 内容块，可承载当前截图生成的 JPEG/PNG data URL；纯文本沿用字符串内容。系统消息和历史助手消息不携带图片，符合 DeepSeek 视觉接口限制。模型未配置、API Key 缺失、网络错误、HTTP 错误和无效响应均转化为明确的产品错误。
 
 ## 7. 存储
 
@@ -236,7 +234,6 @@ VITE_VISION_MODEL_ID
 保存：
 
 - DeepSeek API Key
-- Doubao API Key
 - 对话保留开关
 - 用户主动选择保留的问答文本
 

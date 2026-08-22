@@ -233,7 +233,7 @@ describe('StudyWorkspace', () => {
             '| Accuracy | **92%** |',
           ].join('\n'),
           createdAt: 2,
-          answeredBy: 'doubao',
+          answeredBy: 'deepseek',
         },
       ],
     };

@@ -159,7 +159,6 @@ export interface PageContext {
 
 export interface UserSettings {
   apiKey: string;
-  visionApiKey: string;
   retainConversations: boolean;
 }
 

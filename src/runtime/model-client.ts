@@ -1,14 +1,8 @@
-import type {
-  AnswerModel,
-  ModelContentPart,
-  ModelMessage,
-  ModelRequest,
-} from '../core/types.ts';
+import type { ModelRequest } from '../core/types.ts';
 
 export type ModelClientErrorCode =
   | 'MODEL_NOT_CONFIGURED'
   | 'API_KEY_MISSING'
-  | 'VISION_NOT_SUPPORTED'
   | 'PROVIDER_ERROR'
   | 'INVALID_RESPONSE'
   | 'NETWORK_ERROR';
@@ -27,7 +21,6 @@ export class ModelClientError extends Error {
 export interface ModelConfig {
   endpoint: string;
   model: string;
-  supportsVision?: boolean;
 }
 
 type Fetcher = (
@@ -46,34 +39,6 @@ interface ProviderResponse {
   };
 }
 
-interface ArkResponsesResponse {
-  output_text?: string;
-  output?: Array<{
-    type?: string;
-    content?: Array<{
-      type?: string;
-      text?: string;
-    }>;
-  }>;
-  error?: {
-    message?: string;
-  };
-}
-
-export interface ModelCompletionClient {
-  complete(apiKey: string, request: ModelRequest): Promise<string>;
-}
-
-export interface RoutedModelKeys {
-  textApiKey: string;
-  visionApiKey: string;
-}
-
-export interface RoutedModelResult {
-  content: string;
-  model: AnswerModel;
-}
-
 function assistantText(response: ProviderResponse): string | null {
   const content = response.choices?.[0]?.message?.content;
   if (typeof content === 'string') return content.trim() || null;
@@ -87,64 +52,6 @@ function assistantText(response: ProviderResponse): string | null {
   return text || null;
 }
 
-function arkAssistantText(response: ArkResponsesResponse): string | null {
-  if (typeof response.output_text === 'string') {
-    return response.output_text.trim() || null;
-  }
-
-  const text = (response.output ?? [])
-    .flatMap((item) => item.content ?? [])
-    .filter(
-      (part) =>
-        part.type === 'output_text' && typeof part.text === 'string',
-    )
-    .map((part) => part.text)
-    .join('\n')
-    .trim();
-  return text || null;
-}
-
-export function requestContainsImage(request: ModelRequest): boolean {
-  return request.messages.some(
-    (message) =>
-      Array.isArray(message.content) &&
-      message.content.some((part) => part.type === 'image_url'),
-  );
-}
-
-function arkPart(part: ModelContentPart): {
-  type: 'input_text' | 'input_image';
-  text?: string;
-  image_url?: string;
-} {
-  if (part.type === 'text') {
-    return { type: 'input_text', text: part.text };
-  }
-  return { type: 'input_image', image_url: part.image_url.url };
-}
-
-function arkMessage(message: ModelMessage): {
-  role: ModelMessage['role'];
-  content:
-    | string
-    | Array<{
-        type: 'input_text' | 'input_image';
-        text?: string;
-        image_url?: string;
-      }>;
-} {
-  if (typeof message.content === 'string') {
-    return { role: message.role, content: message.content };
-  }
-
-  const content = message.content.map(arkPart);
-  const images = content.filter((part) => part.type === 'input_image');
-  const text = content.filter((part) => part.type === 'input_text');
-  return {
-    role: message.role,
-    content: [...images, ...text],
-  };
-}
 
 async function fetchJson<T>(
   fetcher: Fetcher,
@@ -211,13 +118,7 @@ export class OpenAiCompatibleModelClient {
 
   async complete(apiKey: string, request: ModelRequest): Promise<string> {
     validateConfig(this.config);
-    validateApiKey(apiKey);
-    if (this.config.supportsVision === false && requestContainsImage(request)) {
-      throw new ModelClientError(
-        'VISION_NOT_SUPPORTED',
-        `当前模型 ${this.config.model} 不支持图片输入。请改用支持视觉理解的模型后重新构建插件。`,
-      );
-    }
+    validateApiKey(apiKey, 'DeepSeek API Key');
 
     const { payload, response } = await fetchJson<ProviderResponse>(
       this.fetcher,
@@ -248,73 +149,5 @@ export class OpenAiCompatibleModelClient {
       );
     }
     return content;
-  }
-}
-
-export class ArkResponsesModelClient implements ModelCompletionClient {
-  constructor(
-    private readonly config: ModelConfig,
-    private readonly fetcher: Fetcher = (input, init) => fetch(input, init),
-  ) {}
-
-  async complete(apiKey: string, request: ModelRequest): Promise<string> {
-    validateConfig(this.config);
-    validateApiKey(apiKey, 'Doubao API Key');
-
-    const { payload, response } = await fetchJson<ArkResponsesResponse>(
-      this.fetcher,
-      this.config.endpoint,
-      apiKey,
-      {
-        model: this.config.model,
-        input: request.messages.map(arkMessage),
-      },
-    );
-
-    if (!response.ok) {
-      throw new ModelClientError(
-        'PROVIDER_ERROR',
-        payload.error?.message ||
-          `Doubao 模型服务请求失败（HTTP ${response.status}）。`,
-        response.status,
-      );
-    }
-
-    const content = arkAssistantText(payload);
-    if (!content) {
-      throw new ModelClientError(
-        'INVALID_RESPONSE',
-        'Doubao 模型响应中没有可显示的回答。',
-        response.status,
-      );
-    }
-    return content;
-  }
-}
-
-export class RoutedModelClient {
-  constructor(
-    private readonly textClient: ModelCompletionClient,
-    private readonly visionClient: ModelCompletionClient,
-  ) {}
-
-  async complete(
-    keys: RoutedModelKeys,
-    request: ModelRequest,
-  ): Promise<RoutedModelResult> {
-    if (requestContainsImage(request)) {
-      validateApiKey(keys.visionApiKey, 'Doubao API Key');
-      return {
-        content: await this.visionClient.complete(
-          keys.visionApiKey,
-          request,
-        ),
-        model: 'doubao',
-      };
-    }
-    return {
-      content: await this.textClient.complete(keys.textApiKey, request),
-      model: 'deepseek',
-    };
   }
 }

@@ -39,7 +39,7 @@ const assistantMessage: ChatMessage = {
   role: 'assistant',
   content: '图中展示了工作记忆在智能体循环中的流转。',
   createdAt: 2,
-  answeredBy: 'doubao',
+  answeredBy: 'deepseek',
 };
 
 describe('completeQuestionTurn', () => {
@@ -104,7 +104,7 @@ describe('completeQuestionTurn', () => {
 
     expect(completed.focus).toBeNull();
     expect(completed.messages).toEqual([userMessage, assistantMessage]);
-    expect(completed.messages.at(-1)?.answeredBy).toBe('doubao');
+    expect(completed.messages.at(-1)?.answeredBy).toBe('deepseek');
     expect(followUpRequest.messages.map((message) => message.role)).toEqual([
       'system',
       'user',

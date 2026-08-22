@@ -44,7 +44,6 @@ export interface FloatingAssistantBridge {
   activate(): Promise<PageContext>;
   deactivate(): Promise<PageContext>;
   hasApiKey(): Promise<boolean>;
-  hasVisionApiKey(): Promise<boolean>;
   ask(question: string): Promise<PageContext>;
   startImagePicker(): Promise<void>;
   startRegionPicker(): Promise<void>;
@@ -417,7 +416,6 @@ function StatusPanel({
 export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   const [context, setContext] = useState<PageContext | null>(null);
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
-  const [hasVisionApiKey, setHasVisionApiKey] = useState<boolean | null>(null);
   const [isVisible, setIsVisible] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -475,15 +473,9 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
 
   async function refreshApiKeyStatus() {
     try {
-      const [nextHasApiKey, nextHasVisionApiKey] = await Promise.all([
-        bridge.hasApiKey(),
-        bridge.hasVisionApiKey(),
-      ]);
-      setHasApiKey(nextHasApiKey);
-      setHasVisionApiKey(nextHasVisionApiKey);
+      setHasApiKey(await bridge.hasApiKey());
     } catch {
       setHasApiKey(false);
-      setHasVisionApiKey(false);
     }
   }
 
@@ -533,16 +525,11 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
 
   useEffect(() => {
     let active = true;
-    void Promise.all([
-      bridge.initialize(),
-      bridge.hasApiKey(),
-      bridge.hasVisionApiKey(),
-    ])
-      .then(([nextContext, nextHasApiKey, nextHasVisionApiKey]) => {
+    void Promise.all([bridge.initialize(), bridge.hasApiKey()])
+      .then(([nextContext, nextHasApiKey]) => {
         if (!active || explicitActivationRef.current) return;
         setContext(nextContext);
         setHasApiKey(nextHasApiKey);
-        setHasVisionApiKey(nextHasVisionApiKey);
         setIsVisible(nextContext.status !== 'unactivated');
       })
       .catch((cause: unknown) => {
@@ -942,13 +929,8 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     context?.status === 'parsing' ||
     context?.status === 'answering' ||
     isSending;
-  const requiresVision =
-    Boolean(context?.focus) && context?.focus?.type !== 'text';
-  const requiredApiKeyStatus = requiresVision
-    ? hasVisionApiKey
-    : hasApiKey;
   const canAsk =
-    requiredApiKeyStatus === true &&
+    hasApiKey === true &&
     (context?.status === 'ready' || context?.status === 'partial');
   const canSelectImage =
     context?.status === 'ready' || context?.status === 'partial';
@@ -1100,9 +1082,9 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
                         : context.focus.text || '框选区域'}
                     </strong>
                     <span>
-                      {hasVisionApiKey === false
-                        ? '请先配置 Doubao API Key'
-                        : '含图片，发送时使用 Doubao'}
+                      {hasApiKey === false
+                        ? '请先配置 DeepSeek API Key'
+                        : '含图片，将使用 DeepSeek 视觉模型'}
                     </span>
                   </div>
                   <button
@@ -1119,7 +1101,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
 
           <StatusPanel
             context={context}
-            hasApiKey={requiredApiKeyStatus}
+            hasApiKey={hasApiKey}
             onOpenSettings={() => void bridge.openSettings()}
             onOpenDiagnostics={() => setShowDiagnostics(true)}
             onRetry={() => void activatePage()}
@@ -1165,12 +1147,12 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           ) : (
         <div className="cr-empty">
           <p>
-            {requiredApiKeyStatus === false
+            {hasApiKey === false
               ? '配置后即可提问'
               : '从当前页面开始提问'}
           </p>
           <span>
-            {requiredApiKeyStatus === false
+            {hasApiKey === false
               ? 'API Key 只保存在这个浏览器中。'
               : '回答会结合已理解的页面内容。'}
           </span>
@@ -1220,13 +1202,11 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           value={question}
           aria-expanded={isComposerMaximized}
           placeholder={
-            requiresVision && hasVisionApiKey === false
-              ? '请先填写 Doubao API Key'
-              : !requiresVision && hasApiKey === false
-                ? '请先填写 DeepSeek API Key'
-                : canAsk
-                  ? '输入问题…'
-                  : statusLabel(context)
+            hasApiKey === false
+              ? '请先填写 DeepSeek API Key'
+              : canAsk
+                ? '输入问题…'
+                : statusLabel(context)
           }
           disabled={!canAsk || isSending}
           onChange={(event) => setQuestion(event.target.value)}

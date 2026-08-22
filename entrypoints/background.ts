@@ -29,12 +29,7 @@ import type {
   ExtensionRequest,
   RuntimeResult,
 } from '../src/runtime/messages.ts';
-import {
-  ArkResponsesModelClient,
-  OpenAiCompatibleModelClient,
-  RoutedModelClient,
-  requestContainsImage,
-} from '../src/runtime/model-client.ts';
+import { OpenAiCompatibleModelClient } from '../src/runtime/model-client.ts';
 import {
   loadSettings,
   localStorageArea,
@@ -42,22 +37,14 @@ import {
 } from '../src/runtime/settings-store.ts';
 
 const environment = import.meta.env;
-const modelClient = new RoutedModelClient(
-  new OpenAiCompatibleModelClient({
-    endpoint: environment.VITE_MODEL_API_URL?.trim() ?? '',
-    model: environment.VITE_MODEL_ID?.trim() ?? '',
-    supportsVision: false,
-  }),
-  new ArkResponsesModelClient({
-    endpoint:
-      environment.VITE_VISION_MODEL_API_URL?.trim() ||
-      'https://ark.cn-beijing.volces.com/api/v3/responses',
-    model:
-      environment.VITE_VISION_MODEL_ID?.trim() ||
-      'doubao-seed-2-0-mini-260428',
-    supportsVision: true,
-  }),
-);
+const modelClient = new OpenAiCompatibleModelClient({
+  endpoint:
+    environment.VITE_MODEL_API_URL?.trim() ||
+    'https://api.deepseek.com/chat/completions',
+  model:
+    environment.VITE_MODEL_ID?.trim() ||
+    'deepseek-v4-flash-vision-exp',
+});
 const contexts = new SessionContextRepository(sessionStorageArea());
 const conversations = new ConversationArchive(localStorageArea());
 
@@ -223,16 +210,8 @@ async function askPage(
     history: current.messages,
     focus: current.focus,
   });
-  const containsImage = requestContainsImage(request);
-  const missingKey = containsImage
-    ? !settings.visionApiKey.trim()
-    : !settings.apiKey.trim();
-  if (missingKey) {
-    throw new Error(
-      containsImage
-        ? '请先在设置中填写 Doubao API Key。'
-        : '请先在设置中填写 DeepSeek API Key。',
-    );
+  if (!settings.apiKey.trim()) {
+    throw new Error('请先在设置中填写 DeepSeek API Key。');
   }
   const withQuestion: PageContext = {
     ...current,
@@ -252,16 +231,10 @@ async function askPage(
   await notify(withQuestion);
 
   try {
-    const answer = await modelClient.complete(
-      {
-        textApiKey: settings.apiKey,
-        visionApiKey: settings.visionApiKey,
-      },
-      request,
-    );
+    const answer = await modelClient.complete(settings.apiKey, request);
     const completed = completeQuestionTurn(
       withQuestion,
-      message('assistant', answer.content, answer.model),
+      message('assistant', answer, 'deepseek'),
     );
     await contexts.save(completed);
     if (settings.retainConversations) {
@@ -447,8 +420,6 @@ async function handleRequest(
         return success(undefined);
       case 'settings:has-key':
         return success(Boolean((await loadSettings()).apiKey.trim()));
-      case 'settings:has-vision-key':
-        return success(Boolean((await loadSettings()).visionApiKey.trim()));
     }
   } catch (cause) {
     return failure(cause);

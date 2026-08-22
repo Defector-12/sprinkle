@@ -34,10 +34,6 @@ export class ContentAssistantBridge implements FloatingAssistantBridge {
     return send<boolean>({ type: 'settings:has-key' });
   }
 
-  hasVisionApiKey(): Promise<boolean> {
-    return send<boolean>({ type: 'settings:has-vision-key' });
-  }
-
   ask(question: string): Promise<PageContext> {
     return send<PageContext>({ type: 'chat:ask', question });
   }

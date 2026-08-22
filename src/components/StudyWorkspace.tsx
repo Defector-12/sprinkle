@@ -276,7 +276,9 @@ function FocusPreview({
         <img src={focus.imageUrl} alt="" aria-hidden="true" />
       )}
       <div>
-        <span>{focus.type === 'text' ? '文字引用' : '图片引用 · Doubao'}</span>
+        <span>
+          {focus.type === 'text' ? '文字引用' : '图片引用 · DeepSeek'}
+        </span>
         <p>
           {focus.type === 'image'
             ? focus.alt || focus.text || '页面图片'

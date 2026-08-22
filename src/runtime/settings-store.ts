@@ -9,9 +9,12 @@ import {
 
 const SETTINGS_KEY = 'context-reader:settings';
 
+interface StoredUserSettings extends Partial<UserSettings> {
+  visionApiKey?: unknown;
+}
+
 export const DEFAULT_SETTINGS: UserSettings = {
   apiKey: '',
-  visionApiKey: '',
   retainConversations: false,
 };
 
@@ -33,16 +36,18 @@ export function sessionStorageArea(): StorageArea {
 
 export async function loadSettings(): Promise<UserSettings> {
   const result = await browser.storage.local.get(SETTINGS_KEY);
-  const stored = result[SETTINGS_KEY] as Partial<UserSettings> | undefined;
-  return {
+  const stored = result[SETTINGS_KEY] as StoredUserSettings | undefined;
+  const settings: UserSettings = {
     apiKey: typeof stored?.apiKey === 'string' ? stored.apiKey : '',
-    visionApiKey:
-      typeof stored?.visionApiKey === 'string' ? stored.visionApiKey : '',
     retainConversations:
       typeof stored?.retainConversations === 'boolean'
         ? stored.retainConversations
         : false,
   };
+  if (stored && 'visionApiKey' in stored) {
+    await browser.storage.local.set({ [SETTINGS_KEY]: settings });
+  }
+  return settings;
 }
 
 export class BrowserSettingsStore implements SettingsStore {

@@ -27,26 +27,31 @@ describe('settings store', () => {
     remove.mockReset();
   });
 
-  it('migrates existing text-only settings with an empty Doubao key', async () => {
+  it('loads existing DeepSeek settings without requiring a vision key', async () => {
     get.mockResolvedValue({
       'context-reader:settings': {
         apiKey: 'deepseek-key',
+        visionApiKey: 'legacy-doubao-key',
         retainConversations: true,
       },
     });
 
     await expect(loadSettings()).resolves.toEqual({
       apiKey: 'deepseek-key',
-      visionApiKey: '',
       retainConversations: true,
+    });
+    expect(set).toHaveBeenCalledWith({
+      'context-reader:settings': {
+        apiKey: 'deepseek-key',
+        retainConversations: true,
+      },
     });
   });
 
-  it('stores both provider keys only in extension local storage', async () => {
+  it('stores the DeepSeek key only in extension local storage', async () => {
     set.mockResolvedValue(undefined);
     const settings = {
       apiKey: 'deepseek-key',
-      visionApiKey: 'doubao-key',
       retainConversations: false,
     };
 
