@@ -320,6 +320,43 @@ describe('StudyWorkspace', () => {
     ).toBeVisible();
   });
 
+  it('finishes an in-progress answer when the workspace becomes hidden', async () => {
+    const answer = 'This answer should be complete when the user returns.';
+    const bridge = createBridge({
+      ask: vi.fn().mockResolvedValue({
+        ...readyContext,
+        messages: [
+          ...readyContext.messages,
+          {
+            id: 'assistant-before-switch',
+            role: 'assistant',
+            content: answer,
+            createdAt: 2,
+            answeredBy: 'deepseek',
+          },
+        ],
+      }),
+    });
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    render(<StudyWorkspace bridge={bridge} />);
+    const input = await screen.findByRole('textbox', {
+      name: '向当前资料提问',
+    });
+
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'Explain the update.' } });
+      fireEvent.click(screen.getByRole('button', { name: '发送问题' }));
+      await Promise.resolve();
+    });
+    expect(screen.queryByText(answer)).not.toBeInTheDocument();
+
+    hidden.mockReturnValue(true);
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+
+    expect(screen.getByText(answer)).toBeVisible();
+  });
+
   it('offers a nearby ask action immediately after selecting text', async () => {
     const bridge = createBridge();
     render(<StudyWorkspace bridge={bridge} />);

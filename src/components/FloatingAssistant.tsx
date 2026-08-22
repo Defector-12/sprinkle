@@ -37,6 +37,7 @@ import {
   MessageReferenceCard,
 } from './MessageContent.tsx';
 import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
+import { useStreamedAnswer } from './use-streamed-answer.ts';
 
 export interface FloatingAssistantBridge {
   initialize(): Promise<PageContext>;
@@ -66,8 +67,6 @@ const DIALOG_MIN_HEIGHT = 260;
 const DIALOG_MAX_WIDTH = 720;
 const DIALOG_MAX_HEIGHT = 640;
 const DRAG_THRESHOLD = 4;
-const STREAM_INTERVAL_MS = 18;
-const STREAM_STEP = 2;
 
 interface OrbPosition {
   x: number;
@@ -273,14 +272,6 @@ function dialogLayout(
   };
 }
 
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-}
-
 function statusLabel(context: PageContext | null): string {
   switch (context?.status) {
     case 'unactivated':
@@ -424,9 +415,16 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isMovingDialog, setIsMovingDialog] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
-  const [revealed, setRevealed] = useState<{ id: string; count: number } | null>(
-    null,
-  );
+  const {
+    target: streamingTarget,
+    revealedCount,
+    waitForAnswer,
+    acceptAnswer,
+    cancelAnswer,
+    finishStreaming,
+    visibleContent,
+    isStreaming: isMessageStreaming,
+  } = useStreamedAnswer();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const messagesEndRef = useRef<HTMLLIElement>(null);
@@ -497,6 +495,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   }
 
   async function deactivatePage() {
+    finishStreaming();
     setError(null);
     try {
       const nextContext = await bridge.deactivate();
@@ -516,6 +515,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   }
 
   function closeDialog() {
+    finishStreaming();
     setShowDiagnostics(false);
     setIsComposerMaximized(false);
     setIsOpen(false);
@@ -538,6 +538,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
 
     const unsubscribe = bridge.subscribe((nextContext) => {
       if (!active) return;
+      acceptAnswer(nextContext);
       setContext(nextContext);
       setIsVisible(nextContext.status !== 'unactivated');
     });
@@ -563,7 +564,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       window.removeEventListener('keydown', closeWithEscape);
       window.removeEventListener('focus', refreshAfterSettings);
     };
-  }, [bridge]);
+  }, [acceptAnswer, bridge]);
 
   useEffect(() => {
     const enabled =
@@ -589,29 +590,6 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     inputRef.current?.focus();
   }, [isComposerMaximized, isOpen]);
 
-  const lastMessage = context?.messages.at(-1) ?? null;
-  const streamingId =
-    lastMessage?.role === 'assistant' ? lastMessage.id : null;
-  const streamingContent = lastMessage?.content ?? '';
-
-  useEffect(() => {
-    if (!streamingId) return;
-    if (prefersReducedMotion()) {
-      setRevealed({ id: streamingId, count: streamingContent.length });
-      return;
-    }
-
-    setRevealed({ id: streamingId, count: 0 });
-    let count = 0;
-    const timer = window.setInterval(() => {
-      count = Math.min(streamingContent.length, count + STREAM_STEP);
-      setRevealed({ id: streamingId, count });
-      if (count >= streamingContent.length) window.clearInterval(timer);
-    }, STREAM_INTERVAL_MS);
-
-    return () => window.clearInterval(timer);
-  }, [streamingId, streamingContent]);
-
   useEffect(() => {
     if (!isOpen || isComposerMaximized) return;
     messagesEndRef.current?.scrollIntoView?.({
@@ -621,23 +599,27 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   }, [context?.messages, isComposerMaximized, isOpen]);
 
   useEffect(() => {
-    if (!isOpen || isComposerMaximized || !revealed) return;
+    if (!isOpen || isComposerMaximized || !streamingTarget) return;
     messagesEndRef.current?.scrollIntoView?.({
       behavior: 'auto',
       block: 'end',
     });
-  }, [isComposerMaximized, isOpen, revealed]);
+  }, [isComposerMaximized, isOpen, revealedCount, streamingTarget]);
 
   async function sendQuestion() {
     const value = question.trim();
     if (!value || isSending) return;
 
     setIsSending(true);
+    waitForAnswer(context);
     setError(null);
     try {
-      setContext(await bridge.ask(value));
+      const nextContext = await bridge.ask(value);
+      acceptAnswer(nextContext);
+      setContext(nextContext);
       setQuestion('');
     } catch (cause) {
+      cancelAnswer();
       setError(cause instanceof Error ? cause.message : '问题发送失败');
     } finally {
       setIsSending(false);
@@ -645,6 +627,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   }
 
   async function startImagePicker() {
+    finishStreaming();
     setError(null);
     setIsOpen(false);
     try {
@@ -656,6 +639,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   }
 
   async function startRegionPicker() {
+    finishStreaming();
     setError(null);
     setIsOpen(false);
     try {
@@ -1100,13 +1084,8 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           {context?.messages.length ? (
         <ol className="cr-messages" aria-label="当前页面对话">
           {context.messages.map((message) => {
-            const isStreaming =
-              message.id === streamingId &&
-              revealed?.id === message.id &&
-              revealed.count < message.content.length;
-            const shownText = isStreaming
-              ? message.content.slice(0, revealed.count)
-              : message.content;
+            const isStreaming = isMessageStreaming(message);
+            const shownText = visibleContent(message);
             return (
               <li
                 className={`cr-message cr-message--${message.role}`}

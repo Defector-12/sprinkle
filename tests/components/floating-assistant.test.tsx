@@ -143,6 +143,66 @@ describe('FloatingAssistant', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('shows restored answers immediately without replaying the typewriter', async () => {
+    const historicalAnswer =
+      'This answer was completed before the current view was mounted. '
+        .repeat(8)
+        .trim();
+    const bridge = createBridge({
+      ...readyContext,
+      messages: [
+        {
+          id: 'historical-answer',
+          role: 'assistant',
+          content: historicalAnswer,
+          createdAt: 1,
+          answeredBy: 'deepseek',
+        },
+      ],
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+
+    expect(screen.getByText(historicalAnswer)).toBeVisible();
+  });
+
+  it('shows answers created in another view without replaying them', async () => {
+    let publishContext: ((context: PageContext) => void) | undefined;
+    const bridge = createBridge(readyContext, {
+      subscribe: vi.fn((listener: (context: PageContext) => void) => {
+        publishContext = listener;
+        return () => undefined;
+      }),
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    const externalAnswer =
+      'This answer was completed in the study workspace. '.repeat(8).trim();
+
+    await act(async () => {
+      publishContext?.({
+        ...readyContext,
+        messages: [
+          {
+            id: 'study-answer',
+            role: 'assistant',
+            content: externalAnswer,
+            createdAt: 2,
+            answeredBy: 'deepseek',
+          },
+        ],
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(externalAnswer)).toBeVisible();
+  });
+
   it('opens the full-page study workspace from the conversation header', async () => {
     const bridge = createBridge();
     render(<FloatingAssistant bridge={bridge} />);

@@ -36,6 +36,7 @@ import {
   MessageReferenceCard,
 } from './MessageContent.tsx';
 import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
+import { useStreamedAnswer } from './use-streamed-answer.ts';
 
 export interface StudyWorkspaceBridgeContract {
   initialize(): Promise<PageContext>;
@@ -75,8 +76,6 @@ interface SelectionAction {
 
 const MIN_READER_WIDTH = 30;
 const MAX_READER_WIDTH = 75;
-const STREAM_INTERVAL_MS = 18;
-const STREAM_STEP = 2;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -193,13 +192,6 @@ function FormulaView({ formula }: { formula: ArticleFormula }) {
   );
 }
 
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-}
-
 function imageOrder(
   image: ArticleImage,
   blocks: ArticleBlock[],
@@ -298,11 +290,15 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
   const [regionMode, setRegionMode] = useState(false);
   const [capturingRegion, setCapturingRegion] = useState(false);
   const [region, setRegion] = useState<RegionSelection | null>(null);
-  const [streamingTarget, setStreamingTarget] = useState<{
-    id: string;
-    content: string;
-  } | null>(null);
-  const [revealedCount, setRevealedCount] = useState(0);
+  const {
+    target: streamingTarget,
+    revealedCount,
+    waitForAnswer,
+    acceptAnswer,
+    cancelAnswer,
+    visibleContent,
+    isStreaming: isMessageStreaming,
+  } = useStreamedAnswer();
   const workspaceRef = useRef<HTMLElement>(null);
   const documentRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -310,7 +306,6 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
   const dividerDrag = useRef(false);
   const regionDrag = useRef(false);
   const regionRef = useRef<RegionSelection | null>(null);
-  const awaitingAnswerRef = useRef(false);
   useAutoGrowTextarea(inputRef, question, isComposerMaximized, 92);
 
   useEffect(() => {
@@ -329,44 +324,14 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
       });
     const unsubscribe = bridge.subscribe((nextContext) => {
       if (!active) return;
-      const answer = nextContext.messages.at(-1);
-      if (awaitingAnswerRef.current && answer?.role === 'assistant') {
-        awaitingAnswerRef.current = false;
-        setRevealedCount(0);
-        setStreamingTarget({
-          id: answer.id,
-          content: answer.content,
-        });
-      }
+      acceptAnswer(nextContext);
       setContext(nextContext);
     });
     return () => {
       active = false;
       unsubscribe();
     };
-  }, [bridge]);
-
-  useEffect(() => {
-    if (!streamingTarget) return;
-    if (prefersReducedMotion()) {
-      setRevealedCount(streamingTarget.content.length);
-      return;
-    }
-
-    setRevealedCount(0);
-    let count = 0;
-    const timer = window.setInterval(() => {
-      count = Math.min(
-        streamingTarget.content.length,
-        count + STREAM_STEP,
-      );
-      setRevealedCount(count);
-      if (count >= streamingTarget.content.length) {
-        window.clearInterval(timer);
-      }
-    }, STREAM_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [streamingTarget]);
+  }, [acceptAnswer, bridge]);
 
   useEffect(() => {
     if (isComposerMaximized) return;
@@ -526,23 +491,15 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     const value = question.trim();
     if (!value || busy) return;
     setBusy(true);
-    awaitingAnswerRef.current = true;
+    waitForAnswer(context);
     setError(null);
     try {
       const nextContext = await bridge.ask(value);
       setContext(nextContext);
-      const answer = nextContext.messages.at(-1);
-      if (awaitingAnswerRef.current && answer?.role === 'assistant') {
-        awaitingAnswerRef.current = false;
-        setRevealedCount(0);
-        setStreamingTarget({
-          id: answer.id,
-          content: answer.content,
-        });
-      }
+      acceptAnswer(nextContext);
       setQuestion('');
     } catch (cause) {
-      awaitingAnswerRef.current = false;
+      cancelAnswer();
       setError(cause instanceof Error ? cause.message : '问题发送失败');
     } finally {
       setBusy(false);
@@ -902,15 +859,8 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
               <MessageReferenceCard reference={message.reference} />
               {message.role === 'assistant' ? (
                 <AssistantMarkdown
-                  content={
-                    streamingTarget?.id === message.id
-                      ? message.content.slice(0, revealedCount)
-                      : message.content
-                  }
-                  busy={
-                    streamingTarget?.id === message.id &&
-                    revealedCount < message.content.length
-                  }
+                  content={visibleContent(message)}
+                  busy={isMessageStreaming(message)}
                   caretClassName="study-stream-caret"
                 />
               ) : (

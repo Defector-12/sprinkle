@@ -55,6 +55,7 @@ Floating Assistant
 - 只有已启用页面才开放轻量文字快捷入口。
 - 图片点选、双击引用和区域框选只在页面启用后生效，捕获结果写入临时页面上下文。
 - 截图前后校验活动标签页身份，并按 `visualViewport` 映射缩放后的裁剪坐标。
+- Manifest 使用 `<all_urls>` 满足 `captureVisibleTab` 对扩展工作台页面的权限要求；截图仍只由显式图片/区域操作触发。
 - 将选择结果发送给 Background，不持久化数据。
 
 ### Background Service Worker
@@ -74,7 +75,7 @@ Floating Assistant
 - 目录由已提取标题及其层级生成，点击后滚动到对应标题；原文中的锚点目录列表不会重复进入正文。
 - 表格使用原生语义表格安全重建；公式使用白名单 MathML，缺失 MathML 时回退为 TeX 文本。
 - 右侧复用后台问答编排、DeepSeek 模型标签和消息归档。
-- 新回答在客户端逐字揭示，并遵循 `prefers-reduced-motion`。
+- 只有当前视图主动提问后收到的新回答才逐字揭示；初始化、刷新和跨视图同步的历史内容直接完整显示，并遵循 `prefers-reduced-motion`。
 - 助手消息通过 `react-markdown` 与 `remark-gfm` 渲染；原始 HTML 与远程图片被忽略，外部链接使用独立标签页打开。
 - 用户消息保存发送瞬间的 `MessageReference`。会话内图片引用保留预览，长期归档仅保留类型、章节和说明，不持久化截图数据。
 - 悬浮窗与工作台共享输入体验：内容驱动高度、发送后跟随消息末端、可切换全空间编辑模式。
