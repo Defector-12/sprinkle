@@ -27,4 +27,20 @@ describe('study workspace visual surface', () => {
     expect(userMessageRule).toContain('width: fit-content');
     expect(userMessageRule).toMatch(/max-width:\s*min\(/);
   });
+
+  it('keeps expanded question history inside a narrow chat pane', () => {
+    const studyCss = readFileSync(
+      new URL('../../src/styles/study.css', import.meta.url),
+      'utf8',
+    );
+    const historyRule =
+      studyCss.match(
+        /\.study-conversation \.question-history\[data-expanded="true"\]\s*\{([\s\S]*?)\}/,
+      )?.[1] ?? '';
+
+    expect(historyRule).toContain('width: min(200px, calc(100% - 12px))');
+    expect(studyCss).toContain(
+      '.study-chat--composer-maximized .study-conversation',
+    );
+  });
 });

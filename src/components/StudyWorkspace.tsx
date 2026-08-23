@@ -35,6 +35,7 @@ import {
   messageAuthor,
   MessageReferenceCard,
 } from './MessageContent.tsx';
+import { QuestionHistoryRail } from './QuestionHistoryRail.tsx';
 import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
 import { useStreamedAnswer } from './use-streamed-answer.ts';
 
@@ -302,6 +303,7 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
   const workspaceRef = useRef<HTMLElement>(null);
   const documentRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messagesRef = useRef<HTMLOListElement>(null);
   const messagesEndRef = useRef<HTMLLIElement>(null);
   const dividerDrag = useRef(false);
   const regionDrag = useRef(false);
@@ -842,38 +844,51 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
           </span>
         </header>
 
-        <ol className="study-messages" aria-label="当前资料对话">
-          {context.messages.length === 0 && (
-            <li className="study-messages__empty">
-              <Quote size={20} aria-hidden="true" />
-              <strong>问题可以更深入</strong>
-              <p>左侧资料、引用内容和最近对话会共同组成回答上下文。</p>
-            </li>
-          )}
-          {context.messages.map((message) => (
+        <div className="study-conversation">
+          <ol
+            ref={messagesRef}
+            className="study-messages"
+            aria-label="当前资料对话"
+          >
+            {context.messages.length === 0 && (
+              <li className="study-messages__empty">
+                <Quote size={20} aria-hidden="true" />
+                <strong>问题可以更深入</strong>
+                <p>左侧资料、引用内容和最近对话会共同组成回答上下文。</p>
+              </li>
+            )}
+            {context.messages.map((message) => (
+              <li
+                key={message.id}
+                className={`study-message study-message--${message.role}`}
+                data-question-id={
+                  message.role === 'user' ? message.id : undefined
+                }
+              >
+                <span>{messageAuthor(message)}</span>
+                <MessageReferenceCard reference={message.reference} />
+                {message.role === 'assistant' ? (
+                  <AssistantMarkdown
+                    content={visibleContent(message)}
+                    busy={isMessageStreaming(message)}
+                    caretClassName="study-stream-caret"
+                  />
+                ) : (
+                  <p className="message-plain">{message.content}</p>
+                )}
+              </li>
+            ))}
             <li
-              key={message.id}
-              className={`study-message study-message--${message.role}`}
-            >
-              <span>{messageAuthor(message)}</span>
-              <MessageReferenceCard reference={message.reference} />
-              {message.role === 'assistant' ? (
-                <AssistantMarkdown
-                  content={visibleContent(message)}
-                  busy={isMessageStreaming(message)}
-                  caretClassName="study-stream-caret"
-                />
-              ) : (
-                <p className="message-plain">{message.content}</p>
-              )}
-            </li>
-          ))}
-          <li
-            ref={messagesEndRef}
-            className="study-messages__end"
-            aria-hidden="true"
+              ref={messagesEndRef}
+              className="study-messages__end"
+              aria-hidden="true"
+            />
+          </ol>
+          <QuestionHistoryRail
+            messages={context.messages}
+            scrollContainerRef={messagesRef}
           />
-        </ol>
+        </div>
 
         <div className="study-feedback" aria-live="polite" aria-atomic="true">
           {error && <p role="alert">{error}</p>}

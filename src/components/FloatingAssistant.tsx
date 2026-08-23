@@ -36,6 +36,7 @@ import {
   messageAuthor,
   MessageReferenceCard,
 } from './MessageContent.tsx';
+import { QuestionHistoryRail } from './QuestionHistoryRail.tsx';
 import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
 import { useStreamedAnswer } from './use-streamed-answer.ts';
 
@@ -427,6 +428,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   } = useStreamedAnswer();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const messagesRef = useRef<HTMLOListElement>(null);
   const messagesEndRef = useRef<HTMLLIElement>(null);
   const explicitActivationRef = useRef(false);
   const dragState = useRef<{
@@ -1082,31 +1084,48 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           />
 
           {context?.messages.length ? (
-        <ol className="cr-messages" aria-label="当前页面对话">
-          {context.messages.map((message) => {
-            const isStreaming = isMessageStreaming(message);
-            const shownText = visibleContent(message);
-            return (
-              <li
-                className={`cr-message cr-message--${message.role}`}
-                key={message.id}
+            <div className="cr-conversation">
+              <ol
+                ref={messagesRef}
+                className="cr-messages"
+                aria-label="当前页面对话"
               >
-                <span>{messageAuthor(message)}</span>
-                <MessageReferenceCard reference={message.reference} />
-                {message.role === 'assistant' ? (
-                  <AssistantMarkdown
-                    content={shownText}
-                    busy={isStreaming}
-                    caretClassName="cr-stream-caret"
-                  />
-                ) : (
-                  <p className="message-plain">{shownText}</p>
-                )}
-              </li>
-            );
-          })}
-          <li ref={messagesEndRef} className="cr-messages__end" aria-hidden="true" />
-        </ol>
+                {context.messages.map((message) => {
+                  const isStreaming = isMessageStreaming(message);
+                  const shownText = visibleContent(message);
+                  return (
+                    <li
+                      className={`cr-message cr-message--${message.role}`}
+                      key={message.id}
+                      data-question-id={
+                        message.role === 'user' ? message.id : undefined
+                      }
+                    >
+                      <span>{messageAuthor(message)}</span>
+                      <MessageReferenceCard reference={message.reference} />
+                      {message.role === 'assistant' ? (
+                        <AssistantMarkdown
+                          content={shownText}
+                          busy={isStreaming}
+                          caretClassName="cr-stream-caret"
+                        />
+                      ) : (
+                        <p className="message-plain">{shownText}</p>
+                      )}
+                    </li>
+                  );
+                })}
+                <li
+                  ref={messagesEndRef}
+                  className="cr-messages__end"
+                  aria-hidden="true"
+                />
+              </ol>
+              <QuestionHistoryRail
+                messages={context.messages}
+                scrollContainerRef={messagesRef}
+              />
+            </div>
           ) : context?.status === 'parsing' ? (
         <div className="cr-understanding" aria-hidden="true">
           <span />

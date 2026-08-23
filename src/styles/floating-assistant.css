@@ -5,6 +5,7 @@
  */
 
 @import "./message-content.css";
+@import "./question-history.css";
 
 :host {
   all: initial;
@@ -665,8 +666,29 @@ textarea:disabled {
   background: var(--cr-color-surface-muted);
 }
 
+.cr-conversation {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.cr-conversation > .cr-messages {
+  padding-right: calc(var(--cr-space-4) + 8px);
+}
+
+.cr-conversation .question-history {
+  --question-history-bg: var(--cr-color-surface);
+  --question-history-border: var(--cr-color-border);
+  --question-history-text: var(--cr-color-ink);
+  --question-history-muted: var(--cr-color-ink-muted);
+  --question-history-hover: var(--cr-color-surface-muted);
+  --question-history-active: var(--cr-color-accent);
+}
+
 .cr-messages {
   display: grid;
+  width: 100%;
   flex: 1 1 auto;
   min-height: 0;
   gap: var(--cr-space-3);
@@ -965,7 +987,7 @@ textarea:disabled {
 
 .cr-dialog--composer-maximized .cr-focus,
 .cr-dialog--composer-maximized .cr-state,
-.cr-dialog--composer-maximized .cr-messages,
+.cr-dialog--composer-maximized .cr-conversation,
 .cr-dialog--composer-maximized .cr-empty,
 .cr-dialog--composer-maximized .cr-understanding,
 .cr-dialog--composer-maximized .cr-feedback,
