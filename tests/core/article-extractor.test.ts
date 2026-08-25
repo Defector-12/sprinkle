@@ -47,6 +47,42 @@ describe('extractArticle', () => {
     expect(article.isPartial).toBe(false);
   });
 
+  it('preserves authored code lines, explicit breaks, and list item boundaries', () => {
+    document.body.innerHTML = `
+      <article>
+        <h1>Formatting details</h1>
+        <p>First line<br>Second line</p>
+        <pre><code>function answer() {
+  const value = readContext();
+  return value;
+}</code></pre>
+        <ul>
+          <li>Keep the source structure</li>
+          <li>Keep the conversation visible</li>
+        </ul>
+      </article>
+    `;
+
+    const article = extractArticle(
+      document,
+      'https://example.com/formatting',
+    );
+
+    expect(article.blocks.find((block) => block.type === 'paragraph')?.text)
+      .toBe('First line\nSecond line');
+    expect(article.blocks.find((block) => block.type === 'code')?.text)
+      .toBe(
+        [
+          'function answer() {',
+          '  const value = readContext();',
+          '  return value;',
+          '}',
+        ].join('\n'),
+      );
+    expect(article.blocks.find((block) => block.type === 'list')?.text)
+      .toBe('Keep the source structure\nKeep the conversation visible');
+  });
+
   it('extracts inline SVG and canvas charts with their document positions', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(
       'data:image/png;base64,chart',

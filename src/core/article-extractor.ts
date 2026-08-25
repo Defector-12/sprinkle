@@ -57,14 +57,52 @@ function cleanText(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, ' ').trim();
 }
 
-function readableElementText(element: Element): string {
+function readableClone(element: Element): Element {
   const clone = element.cloneNode(true) as Element;
   for (const excluded of clone.querySelectorAll(
     '.katex, math, script, style, [aria-hidden="true"]',
   )) {
     excluded.remove();
   }
-  return cleanText(clone.textContent);
+  return clone;
+}
+
+function readableElementText(element: Element): string {
+  const clone = readableClone(element);
+  for (const lineBreak of clone.querySelectorAll('br')) {
+    lineBreak.replaceWith('\uE000');
+  }
+  return cleanText(clone.textContent).replace(/\s*\uE000\s*/g, '\n');
+}
+
+function readableCodeText(element: Element): string {
+  const clone = readableClone(element);
+  for (const lineBreak of clone.querySelectorAll('br')) {
+    lineBreak.replaceWith('\n');
+  }
+
+  const codeRoot = clone.querySelector(':scope > code') ?? clone;
+  const lineElements = [...codeRoot.children].filter((child) =>
+    child.matches('.line, [data-line], div'),
+  );
+  const rawText =
+    lineElements.length > 1
+      ? lineElements.map((line) => line.textContent ?? '').join('\n')
+      : clone.textContent ?? '';
+
+  return rawText
+    .replace(/\r\n?/g, '\n')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/^(?:[ \t]*\n)+|(?:\n[ \t]*)+$/g, '');
+}
+
+function readableListText(element: Element): string {
+  const items = [...element.children]
+    .filter((child) => child.matches('li'))
+    .map(readableElementText)
+    .filter(Boolean);
+  return items.length > 0 ? items.join('\n') : readableElementText(element);
 }
 
 function blockTypeFor(element: Element): ArticleBlockType {
@@ -390,13 +428,18 @@ export function extractArticle(
       continue;
     }
 
-    const text = readableElementText(element);
+    const type = blockTypeFor(element);
+    const text =
+      type === 'code'
+        ? readableCodeText(element)
+        : type === 'list'
+          ? readableListText(element)
+          : readableElementText(element);
     if (!text) {
       emptyBlockCount += 1;
       continue;
     }
 
-    const type = blockTypeFor(element);
     if (type === 'heading') currentSection = text;
 
     const level = headingLevel(element);
