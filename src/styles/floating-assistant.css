@@ -690,6 +690,7 @@ textarea:disabled {
   display: grid;
   width: 100%;
   flex: 1 1 auto;
+  align-content: start;
   min-height: 0;
   gap: var(--cr-space-3);
   overflow-y: auto;
