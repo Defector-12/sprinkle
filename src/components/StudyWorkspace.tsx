@@ -83,9 +83,36 @@ interface SelectionAction {
 
 const MIN_READER_WIDTH = 30;
 const MAX_READER_WIDTH = 75;
+const MIN_READER_PANE_WIDTH = 420;
+const MIN_CHAT_PANE_WIDTH = 360;
+const DIVIDER_WIDTH = 12;
+const STACKED_LAYOUT_MAX_WIDTH = 900;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function readerWidthRange(workspaceWidth: number): {
+  min: number;
+  max: number;
+} {
+  if (workspaceWidth <= STACKED_LAYOUT_MAX_WIDTH) {
+    return { min: MIN_READER_WIDTH, max: MAX_READER_WIDTH };
+  }
+  return {
+    min: Math.max(
+      MIN_READER_WIDTH,
+      Math.ceil((MIN_READER_PANE_WIDTH / workspaceWidth) * 100),
+    ),
+    max: Math.min(
+      MAX_READER_WIDTH,
+      Math.floor(
+        ((workspaceWidth - DIVIDER_WIDTH - MIN_CHAT_PANE_WIDTH) /
+          workspaceWidth) *
+          100,
+      ),
+    ),
+  };
 }
 
 function headingId(block: ArticleBlock): string {
@@ -123,9 +150,11 @@ function blockElement(block: ArticleBlock) {
       return <blockquote key={block.id} {...attributes}>{block.text}</blockquote>;
     case 'list':
       return (
-        <p key={block.id} {...attributes} className="study-document__list">
-          {block.text}
-        </p>
+        <ul key={block.id} {...attributes} className="study-document__list">
+          {block.text.split('\n').map((item, index) => (
+            <li key={`${block.id}-item-${index}`}>{item}</li>
+          ))}
+        </ul>
       );
     default:
       return <p key={block.id} {...attributes}>{block.text}</p>;
@@ -366,15 +395,29 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     inputRef.current?.focus();
   }, [isComposerMaximized]);
 
+  useEffect(() => {
+    if (!context) return;
+    const fitPaneWidths = () => {
+      const width = workspaceRef.current?.getBoundingClientRect().width;
+      if (!width || width <= STACKED_LAYOUT_MAX_WIDTH) return;
+      const range = readerWidthRange(width);
+      setReaderWidth((current) => clamp(current, range.min, range.max));
+    };
+    fitPaneWidths();
+    window.addEventListener('resize', fitPaneWidths);
+    return () => window.removeEventListener('resize', fitPaneWidths);
+  }, [context?.key]);
+
   function resizeFromPointer(clientX: number) {
     if (!Number.isFinite(clientX)) return;
     const bounds = workspaceRef.current?.getBoundingClientRect();
-    if (!bounds?.width) return;
+    if (!bounds?.width || bounds.width <= STACKED_LAYOUT_MAX_WIDTH) return;
     const percentage = ((clientX - bounds.left) / bounds.width) * 100;
+    const range = readerWidthRange(bounds.width);
     setReaderWidth(Math.round(clamp(
       percentage,
-      MIN_READER_WIDTH,
-      MAX_READER_WIDTH,
+      range.min,
+      range.max,
     )));
   }
 
@@ -382,8 +425,10 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     event.preventDefault();
     const direction = event.key === 'ArrowLeft' ? -1 : 1;
+    const width = workspaceRef.current?.getBoundingClientRect().width ?? 0;
+    const range = readerWidthRange(width);
     setReaderWidth((current) =>
-      clamp(current + direction * 2, MIN_READER_WIDTH, MAX_READER_WIDTH),
+      clamp(current + direction * 2, range.min, range.max),
     );
   }
 

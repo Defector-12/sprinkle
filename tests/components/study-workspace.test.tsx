@@ -554,12 +554,12 @@ describe('StudyWorkspace', () => {
       }),
     );
     await waitFor(() =>
-      expect(workspace).toHaveStyle({ '--reader-width': '70%' }),
+      expect(workspace).toHaveStyle({ '--reader-width': '62%' }),
     );
 
     divider.focus();
     await userEvent.keyboard('{ArrowLeft}');
-    expect(workspace).toHaveStyle({ '--reader-width': '68%' });
+    expect(workspace).toHaveStyle({ '--reader-width': '60%' });
   });
 
   it('quotes selected text, clicked images, and a drawn region', async () => {
