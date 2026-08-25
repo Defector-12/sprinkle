@@ -12,7 +12,7 @@ import {
   StudyWorkspace,
   type StudyWorkspaceBridgeContract,
 } from '../../src/components/StudyWorkspace.tsx';
-import type { PageContext } from '../../src/core/types.ts';
+import type { ImageFocus, PageContext } from '../../src/core/types.ts';
 
 const readyContext: PageContext = {
   key: '7:https://example.com/paper',
@@ -143,7 +143,12 @@ function createBridge(
     initialize: vi.fn().mockResolvedValue(readyContext),
     ask: vi.fn().mockResolvedValue(readyContext),
     setTextFocus: vi.fn().mockResolvedValue(readyContext),
-    setImageFocus: vi.fn().mockResolvedValue(readyContext),
+    setImageFocus: vi
+      .fn()
+      .mockImplementation(async (focus: ImageFocus) => ({
+        ...readyContext,
+        focus,
+      })),
     setRegionFocus: vi.fn().mockResolvedValue(readyContext),
     captureRegion: vi
       .fn()
@@ -202,6 +207,30 @@ describe('StudyWorkspace', () => {
     expect(
       screen.getByRole('textbox', { name: '向当前资料提问' }),
     ).toBeVisible();
+  });
+
+  it('labels an image reference without exposing model routing', async () => {
+    const focusedContext: PageContext = {
+      ...readyContext,
+      focus: {
+        type: 'image',
+        imageUrl: 'data:image/png;base64,c2NyZWVuc2hvdA==',
+        alt: 'Agent memory architecture',
+        text: 'Working memory flow',
+        section: 'Architecture',
+        source: 'screenshot',
+      },
+    };
+    render(
+      <StudyWorkspace
+        bridge={createBridge({
+          initialize: vi.fn().mockResolvedValue(focusedContext),
+        })}
+      />,
+    );
+
+    expect(await screen.findByText('图片引用')).toBeVisible();
+    expect(screen.queryByText('图片引用 · DeepSeek')).not.toBeInTheDocument();
   });
 
   it('renders GFM answers and keeps the image reference attached to its question', async () => {
@@ -411,6 +440,75 @@ describe('StudyWorkspace', () => {
 
     expect(bridge.setImageFocus).toHaveBeenCalled();
     expect(picker).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('uploads a local image from the reader toolbar', async () => {
+    const bridge = createBridge();
+    render(<StudyWorkspace bridge={bridge} />);
+    await screen.findByRole('heading', {
+      name: 'Memory Systems for Autonomous Agents',
+    });
+    const picker = screen.getByLabelText(
+      '选择本地图片文件',
+    ) as HTMLInputElement;
+    const openPicker = vi.spyOn(picker, 'click');
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '上传本地图片' }),
+    );
+    expect(openPicker).toHaveBeenCalledOnce();
+
+    fireEvent.change(picker, {
+      target: {
+        files: [
+          new File(['pixels'], 'local-chart.webp', {
+            type: 'image/webp',
+          }),
+        ],
+      },
+    });
+
+    await waitFor(() =>
+      expect(bridge.setImageFocus).toHaveBeenCalledWith({
+        type: 'image',
+        imageUrl: 'data:image/webp;base64,cGl4ZWxz',
+        alt: 'local-chart.webp',
+        text: 'local-chart.webp',
+        section: '本地上传',
+        source: 'upload',
+      }),
+    );
+    expect(await screen.findByText('local-chart.webp')).toBeVisible();
+  });
+
+  it('uses a pasted clipboard image as the current reference', async () => {
+    const bridge = createBridge();
+    render(<StudyWorkspace bridge={bridge} />);
+    const textarea = await screen.findByRole('textbox', {
+      name: '向当前资料提问',
+    });
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        files: [
+          new File(['clipboard'], 'pasted-chart.png', {
+            type: 'image/png',
+          }),
+        ],
+        items: [],
+      },
+    });
+
+    await waitFor(() =>
+      expect(bridge.setImageFocus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          imageUrl: 'data:image/png;base64,Y2xpcGJvYXJk',
+          alt: 'pasted-chart.png',
+          source: 'upload',
+        }),
+      ),
+    );
+    expect(await screen.findByText('pasted-chart.png')).toBeVisible();
   });
 
   it('resizes both panes with pointer drag and keyboard arrows', async () => {

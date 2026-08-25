@@ -113,7 +113,7 @@ export interface ImageFocus {
   alt: string;
   text: string;
   section: string;
-  source: 'original' | 'screenshot';
+  source: 'original' | 'screenshot' | 'upload';
 }
 
 export interface RegionFocus {

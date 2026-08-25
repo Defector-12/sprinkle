@@ -19,7 +19,7 @@ vi.mock('wxt/browser', () => ({
 }));
 
 import { ContentAssistantBridge } from '../../src/runtime/content-assistant-bridge.ts';
-import type { PageContext } from '../../src/core/types.ts';
+import type { ImageFocus, PageContext } from '../../src/core/types.ts';
 
 describe('ContentAssistantBridge', () => {
   beforeEach(() => {
@@ -76,9 +76,18 @@ describe('ContentAssistantBridge', () => {
   it('routes image tools and focus clearing through background', async () => {
     sendMessage.mockResolvedValue({ ok: true, data: undefined });
     const bridge = new ContentAssistantBridge();
+    const focus: ImageFocus = {
+      type: 'image',
+      imageUrl: 'data:image/png;base64,cGl4ZWxz',
+      alt: 'local.png',
+      text: 'local.png',
+      section: '本地上传',
+      source: 'upload',
+    };
 
     await bridge.startImagePicker();
     await bridge.startRegionPicker();
+    await bridge.setImageFocus(focus);
     await bridge.clearFocus();
 
     expect(sendMessage).toHaveBeenNthCalledWith(1, {
@@ -88,6 +97,10 @@ describe('ContentAssistantBridge', () => {
       type: 'picker:region:start',
     });
     expect(sendMessage).toHaveBeenNthCalledWith(3, {
+      type: 'focus:set',
+      focus,
+    });
+    expect(sendMessage).toHaveBeenNthCalledWith(4, {
       type: 'focus:clear',
     });
   });

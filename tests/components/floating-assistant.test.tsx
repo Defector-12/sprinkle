@@ -6,7 +6,7 @@ import {
   FloatingAssistant,
   type FloatingAssistantBridge,
 } from '../../src/components/FloatingAssistant.tsx';
-import type { PageContext } from '../../src/core/types.ts';
+import type { ImageFocus, PageContext } from '../../src/core/types.ts';
 import { publishAssistantOpen } from '../../src/runtime/assistant-events.ts';
 
 const readyContext: PageContext = {
@@ -86,6 +86,12 @@ function createBridge(
     ask: vi.fn().mockResolvedValue(context),
     startImagePicker: vi.fn().mockResolvedValue(undefined),
     startRegionPicker: vi.fn().mockResolvedValue(undefined),
+    setImageFocus: vi
+      .fn()
+      .mockImplementation(async (focus: ImageFocus) => ({
+        ...context,
+        focus,
+      })),
     clearFocus: vi.fn().mockResolvedValue({ ...context, focus: null }),
     openStudy: vi.fn().mockResolvedValue(undefined),
     openSettings: vi.fn().mockResolvedValue(undefined),
@@ -259,7 +265,87 @@ describe('FloatingAssistant', () => {
     expect(bridge.startRegionPicker).toHaveBeenCalledOnce();
   });
 
-  it('previews an image reference, explains DeepSeek vision use, and can remove it', async () => {
+  it('uploads a local image into the current reference', async () => {
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    const picker = screen.getByLabelText(
+      '选择本地图片文件',
+    ) as HTMLInputElement;
+    const openPicker = vi.spyOn(picker, 'click');
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '上传本地图片' }),
+    );
+    expect(openPicker).toHaveBeenCalledOnce();
+
+    fireEvent.change(picker, {
+      target: {
+        files: [
+          new File(['pixels'], 'architecture.png', {
+            type: 'image/png',
+          }),
+        ],
+      },
+    });
+
+    await waitFor(() =>
+      expect(bridge.setImageFocus).toHaveBeenCalledWith({
+        type: 'image',
+        imageUrl: 'data:image/png;base64,cGl4ZWxz',
+        alt: 'architecture.png',
+        text: 'architecture.png',
+        section: '本地上传',
+        source: 'upload',
+      }),
+    );
+    expect(
+      await screen.findByRole('img', { name: '已引用图片预览' }),
+    ).toHaveAttribute('src', 'data:image/png;base64,cGl4ZWxz');
+  });
+
+  it('uses a pasted clipboard image as the current reference', async () => {
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    const textarea = screen.getByRole('textbox', {
+      name: '向当前文章提问',
+    });
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        files: [
+          new File(['clipboard'], 'pasted-image.png', {
+            type: 'image/png',
+          }),
+        ],
+        items: [],
+      },
+    });
+
+    await waitFor(() =>
+      expect(bridge.setImageFocus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          imageUrl: 'data:image/png;base64,Y2xpcGJvYXJk',
+          alt: 'pasted-image.png',
+          source: 'upload',
+        }),
+      ),
+    );
+
+    fireEvent.paste(textarea, {
+      clipboardData: { files: [], items: [] },
+    });
+    expect(bridge.setImageFocus).toHaveBeenCalledOnce();
+  });
+
+  it('previews an image reference without a model hint and can remove it', async () => {
     const imageContext: PageContext = {
       ...readyContext,
       focus: {
@@ -283,7 +369,9 @@ describe('FloatingAssistant', () => {
     ).toHaveAttribute('src', imageContext.focus?.type === 'image'
       ? imageContext.focus.imageUrl
       : '');
-    expect(screen.getByText('含图片，将使用 DeepSeek 视觉模型')).toBeVisible();
+    expect(
+      screen.queryByText('含图片，将使用 DeepSeek 视觉模型'),
+    ).not.toBeInTheDocument();
 
     await userEvent.click(
       screen.getByRole('button', { name: '移除图片引用' }),

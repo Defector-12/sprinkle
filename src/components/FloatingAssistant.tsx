@@ -13,6 +13,7 @@ import {
   Send,
   Settings,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react';
 import {
@@ -24,7 +25,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 
-import type { PageContext } from '../core/types.ts';
+import type { ImageFocus, PageContext } from '../core/types.ts';
 import {
   publishAssistantActive,
   subscribeAssistantOpen,
@@ -36,6 +37,11 @@ import {
   messageAuthor,
   MessageReferenceCard,
 } from './MessageContent.tsx';
+import {
+  imageFileFromClipboard,
+  LOCAL_IMAGE_ACCEPT,
+  readLocalImage,
+} from './local-image.ts';
 import { QuestionHistoryRail } from './QuestionHistoryRail.tsx';
 import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
 import { useStreamedAnswer } from './use-streamed-answer.ts';
@@ -48,6 +54,7 @@ export interface FloatingAssistantBridge {
   ask(question: string): Promise<PageContext>;
   startImagePicker(): Promise<void>;
   startRegionPicker(): Promise<void>;
+  setImageFocus(focus: ImageFocus): Promise<PageContext>;
   clearFocus(): Promise<PageContext>;
   openStudy(): Promise<void>;
   openSettings(): Promise<void>;
@@ -405,6 +412,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [question, setQuestion] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isComposerMaximized, setIsComposerMaximized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [orbPos, setOrbPos] = useState<OrbPosition>(() =>
@@ -427,6 +435,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     isStreaming: isMessageStreaming,
   } = useStreamedAnswer();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const localImageInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const messagesRef = useRef<HTMLOListElement>(null);
   const messagesEndRef = useRef<HTMLLIElement>(null);
@@ -610,7 +619,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
 
   async function sendQuestion() {
     const value = question.trim();
-    if (!value || isSending) return;
+    if (!value || isSending || isUploadingImage) return;
 
     setIsSending(true);
     waitForAnswer(context);
@@ -649,6 +658,29 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     } catch (cause) {
       setIsOpen(true);
       setError(cause instanceof Error ? cause.message : '无法开始框选区域');
+    }
+  }
+
+  async function uploadLocalImage(file: File) {
+    setIsUploadingImage(true);
+    setError(null);
+    try {
+      const imageUrl = await readLocalImage(file);
+      setContext(
+        await bridge.setImageFocus({
+          type: 'image',
+          imageUrl,
+          alt: file.name || '本地图片',
+          text: file.name || '本地上传图片',
+          section: '本地上传',
+          source: 'upload',
+        }),
+      );
+      inputRef.current?.focus();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '无法上传图片');
+    } finally {
+      setIsUploadingImage(false);
     }
   }
 
@@ -1057,11 +1089,6 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
                           '页面图片'
                         : context.focus.text || '框选区域'}
                     </strong>
-                    <span>
-                      {hasApiKey === false
-                        ? '请先配置 DeepSeek API Key'
-                        : '含图片，将使用 DeepSeek 视觉模型'}
-                    </span>
                   </div>
                   <button
                     type="button"
@@ -1162,7 +1189,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             <button
               type="button"
               aria-label="点选页面图片"
-              disabled={!canSelectImage || isSending}
+              disabled={!canSelectImage || isSending || isUploadingImage}
               onClick={() => void startImagePicker()}
             >
               <Image size={15} aria-hidden="true" />
@@ -1171,11 +1198,44 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             <button
               type="button"
               aria-label="框选页面区域"
-              disabled={!canSelectImage || isSending}
+              disabled={!canSelectImage || isSending || isUploadingImage}
               onClick={() => void startRegionPicker()}
             >
               <Scan size={15} aria-hidden="true" />
               框选区域
+            </button>
+            <input
+              ref={localImageInputRef}
+              type="file"
+              accept={LOCAL_IMAGE_ACCEPT}
+              aria-label="选择本地图片文件"
+              disabled={!canSelectImage || isSending || isUploadingImage}
+              hidden
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = '';
+                if (file) void uploadLocalImage(file);
+              }}
+            />
+            <button
+              type="button"
+              aria-label={
+                isUploadingImage ? '正在上传图片' : '上传本地图片'
+              }
+              title="上传本地图片"
+              disabled={!canSelectImage || isSending || isUploadingImage}
+              onClick={() => localImageInputRef.current?.click()}
+            >
+              {isUploadingImage ? (
+                <LoaderCircle
+                  className="cr-spin"
+                  size={15}
+                  aria-hidden="true"
+                />
+              ) : (
+                <Upload size={15} aria-hidden="true" />
+              )}
+              上传图片
             </button>
           </div>
 
@@ -1198,6 +1258,12 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           }
           disabled={!canAsk || isSending}
           onChange={(event) => setQuestion(event.target.value)}
+          onPaste={(event) => {
+            const file = imageFileFromClipboard(event.clipboardData);
+            if (!file) return;
+            event.preventDefault();
+            if (!isUploadingImage) void uploadLocalImage(file);
+          }}
           onKeyDown={(event) => {
             if (
               event.key === 'Enter' &&
@@ -1233,7 +1299,9 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             className="cr-send"
             type="button"
             aria-label="发送问题"
-            disabled={!canAsk || isSending || !question.trim()}
+            disabled={
+              !canAsk || isSending || isUploadingImage || !question.trim()
+            }
             data-state={error ? 'error' : isSending ? 'loading' : 'default'}
             onClick={() => void sendQuestion()}
           >

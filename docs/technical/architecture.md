@@ -7,7 +7,7 @@
 - 网页默认保持休眠；只有用户点击工具栏图标后才解析页面并显示悬浮助手。
 - 页面正文和对话上下文按标签页与 URL 隔离。
 - 选中文字可以与文章相关片段组成文本问题。
-- 点选图片或框选可见页面区域可以组成多模态问题。
+- 上传或粘贴本地图片、点选页面图片或框选可见区域可以组成多模态问题。
 - API Key 不进入网页上下文。
 - 页面关闭后清理临时正文。
 
@@ -21,7 +21,7 @@ Browser Action
             -> runtime message("context:activate")
             -> article extraction
             -> text selection
-            -> image / visible-region capture
+            -> local image upload or paste / page image / visible-region capture
             -> runtime message
                  -> Background Service Worker
                       -> storage.session: PageContext

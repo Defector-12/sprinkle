@@ -1,7 +1,7 @@
 import { browser } from 'wxt/browser';
 
 import type { FloatingAssistantBridge } from '../components/FloatingAssistant.tsx';
-import type { PageContext } from '../core/types.ts';
+import type { ImageFocus, PageContext } from '../core/types.ts';
 import { normalizePageUrl } from '../core/url.ts';
 import { isContextChangedEvent } from './messages.ts';
 import { sendRuntimeRequest } from './runtime-client.ts';
@@ -33,6 +33,10 @@ export class ContentAssistantBridge implements FloatingAssistantBridge {
 
   async startRegionPicker(): Promise<void> {
     await sendRuntimeRequest<void>({ type: 'picker:region:start' });
+  }
+
+  setImageFocus(focus: ImageFocus): Promise<PageContext> {
+    return sendRuntimeRequest<PageContext>({ type: 'focus:set', focus });
   }
 
   clearFocus(): Promise<PageContext> {

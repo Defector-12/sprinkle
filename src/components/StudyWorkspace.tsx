@@ -7,6 +7,7 @@ import {
   Minimize2,
   Quote,
   Scan,
+  Upload,
   X,
 } from 'lucide-react';
 import {
@@ -35,6 +36,11 @@ import {
   messageAuthor,
   MessageReferenceCard,
 } from './MessageContent.tsx';
+import {
+  imageFileFromClipboard,
+  LOCAL_IMAGE_ACCEPT,
+  readLocalImage,
+} from './local-image.ts';
 import { QuestionHistoryRail } from './QuestionHistoryRail.tsx';
 import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
 import { useStreamedAnswer } from './use-streamed-answer.ts';
@@ -262,7 +268,11 @@ function FocusPreview({
       )}
       <div>
         <span>
-          {focus.type === 'text' ? '文字引用' : '图片引用 · DeepSeek'}
+          {focus.type === 'text'
+            ? '文字引用'
+            : focus.type === 'image'
+              ? '图片引用'
+              : '框选区域'}
         </span>
         <p>
           {focus.type === 'image'
@@ -303,6 +313,7 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
   const workspaceRef = useRef<HTMLElement>(null);
   const documentRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const localImageInputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLOListElement>(null);
   const messagesEndRef = useRef<HTMLLIElement>(null);
   const dividerDrag = useRef(false);
@@ -447,6 +458,30 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     }
   }
 
+  async function uploadLocalImage(file: File) {
+    setBusy(true);
+    setImagePickMode(false);
+    setError(null);
+    try {
+      const imageUrl = await readLocalImage(file);
+      setContext(
+        await bridge.setImageFocus({
+          type: 'image',
+          imageUrl,
+          alt: file.name || '本地图片',
+          text: file.name || '本地上传图片',
+          section: '本地上传',
+          source: 'upload',
+        }),
+      );
+      inputRef.current?.focus();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '无法上传图片');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function completeRegionSelection(selection: RegionSelection) {
     const documentBounds = documentRef.current?.getBoundingClientRect();
     if (!documentBounds || selection.width < 12 || selection.height < 12) {
@@ -583,6 +618,29 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
             >
               <ImageIcon size={16} aria-hidden="true" />
               <span>点选图片</span>
+            </button>
+            <input
+              ref={localImageInputRef}
+              type="file"
+              accept={LOCAL_IMAGE_ACCEPT}
+              aria-label="选择本地图片文件"
+              disabled={busy}
+              hidden
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = '';
+                if (file) void uploadLocalImage(file);
+              }}
+            />
+            <button
+              type="button"
+              aria-label="上传本地图片"
+              title="上传本地图片"
+              disabled={busy}
+              onClick={() => localImageInputRef.current?.click()}
+            >
+              <Upload size={16} aria-hidden="true" />
+              <span>上传图片</span>
             </button>
             <button type="button" onClick={() => setRegionMode(true)}>
               <Scan size={16} aria-hidden="true" />
@@ -911,6 +969,12 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
             placeholder="记录你的问题、反例或推演…"
             disabled={busy}
             onChange={(event) => setQuestion(event.target.value)}
+            onPaste={(event) => {
+              const file = imageFileFromClipboard(event.clipboardData);
+              if (!file) return;
+              event.preventDefault();
+              void uploadLocalImage(file);
+            }}
             onKeyDown={(event) => {
               if (
                 event.key === 'Enter' &&

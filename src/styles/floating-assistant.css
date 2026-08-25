@@ -331,7 +331,6 @@ textarea:disabled {
 .cr-focus > div {
   display: grid;
   min-width: 0;
-  gap: 2px;
 }
 
 .cr-focus > div strong {
@@ -341,16 +340,6 @@ textarea:disabled {
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.cr-focus > div span {
-  border: 0;
-  padding: 0;
-  color: var(--cr-color-ink-muted);
-  font-size: 10px;
-  font-weight: 500;
-  line-height: 1.4;
-  white-space: normal;
 }
 
 .cr-focus > button {
@@ -867,6 +856,7 @@ textarea:disabled {
 .cr-composer-tools {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   gap: var(--cr-space-2);
   border-top: 1px solid var(--cr-color-border);
   padding: var(--cr-space-2) var(--cr-space-3) 0;
