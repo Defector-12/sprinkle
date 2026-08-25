@@ -1,50 +1,65 @@
 import { browser } from 'wxt/browser';
 
 import type { FloatingAssistantBridge } from '../components/FloatingAssistant.tsx';
-import type { PageContext } from '../core/types.ts';
-import {
-  isContextChangedEvent,
-  type ExtensionRequest,
-  type RuntimeResult,
-} from './messages.ts';
-
-async function send<T>(message: ExtensionRequest): Promise<T> {
-  const response = (await browser.runtime.sendMessage(
-    message,
-  )) as RuntimeResult<T>;
-  if (!response) throw new Error('扩展后台没有响应');
-  if (!response.ok) throw new Error(response.error);
-  return response.data;
-}
+import type { ImageFocus, PageContext } from '../core/types.ts';
+import { normalizePageUrl } from '../core/url.ts';
+import { isContextChangedEvent } from './messages.ts';
+import { sendRuntimeRequest } from './runtime-client.ts';
 
 export class ContentAssistantBridge implements FloatingAssistantBridge {
   initialize(): Promise<PageContext> {
-    return send<PageContext>({ type: 'context:get' });
+    return sendRuntimeRequest<PageContext>({ type: 'context:get' });
   }
 
   activate(): Promise<PageContext> {
-    return send<PageContext>({ type: 'context:activate' });
+    return sendRuntimeRequest<PageContext>({ type: 'context:activate' });
   }
 
   deactivate(): Promise<PageContext> {
-    return send<PageContext>({ type: 'context:clear' });
+    return sendRuntimeRequest<PageContext>({ type: 'context:clear' });
   }
 
   hasApiKey(): Promise<boolean> {
-    return send<boolean>({ type: 'settings:has-key' });
+    return sendRuntimeRequest<boolean>({ type: 'settings:has-key' });
   }
 
   ask(question: string): Promise<PageContext> {
-    return send<PageContext>({ type: 'chat:ask', question });
+    return sendRuntimeRequest<PageContext>({ type: 'chat:ask', question });
+  }
+
+  async startImagePicker(): Promise<void> {
+    await sendRuntimeRequest<void>({ type: 'picker:image:start' });
+  }
+
+  async startRegionPicker(): Promise<void> {
+    await sendRuntimeRequest<void>({ type: 'picker:region:start' });
+  }
+
+  setImageFocus(focus: ImageFocus): Promise<PageContext> {
+    return sendRuntimeRequest<PageContext>({ type: 'focus:set', focus });
+  }
+
+  clearFocus(): Promise<PageContext> {
+    return sendRuntimeRequest<PageContext>({ type: 'focus:clear' });
+  }
+
+  async openStudy(): Promise<void> {
+    await sendRuntimeRequest<void>({ type: 'study:open' });
   }
 
   async openSettings(): Promise<void> {
-    await send<void>({ type: 'settings:open' });
+    await sendRuntimeRequest<void>({ type: 'settings:open' });
   }
 
   subscribe(listener: (context: PageContext) => void): () => void {
     const onMessage = (message: unknown) => {
-      if (isContextChangedEvent(message)) listener(message.context);
+      if (
+        isContextChangedEvent(message) &&
+        normalizePageUrl(message.context.url) ===
+          normalizePageUrl(location.href)
+      ) {
+        listener(message.context);
+      }
     };
 
     browser.runtime.onMessage.addListener(onMessage);

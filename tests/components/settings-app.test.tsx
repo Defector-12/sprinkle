@@ -19,12 +19,15 @@ function createStore(): SettingsStore {
 }
 
 describe('SettingsApp', () => {
-  it('only exposes the API key and retention preference', async () => {
+  it('exposes one DeepSeek key with the retention preference', async () => {
     const store = createStore();
     render(<SettingsApp store={store} />);
 
-    const apiKey = await screen.findByLabelText('API Key');
-    expect(apiKey).toHaveAttribute('type', 'password');
+    expect(await screen.findByLabelText('DeepSeek API Key')).toHaveAttribute(
+      'type',
+      'password',
+    );
+    expect(screen.queryByLabelText('Doubao API Key')).not.toBeInTheDocument();
     expect(screen.getByLabelText('保留对话记录')).toBeVisible();
     expect(screen.queryByLabelText('模型')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('API 地址')).not.toBeInTheDocument();
@@ -34,15 +37,42 @@ describe('SettingsApp', () => {
     const store = createStore();
     render(<SettingsApp store={store} />);
 
-    await userEvent.type(await screen.findByLabelText('API Key'), 'secret-key');
+    await userEvent.type(
+      await screen.findByLabelText('DeepSeek API Key'),
+      'deepseek-key',
+    );
     await userEvent.click(screen.getByLabelText('保留对话记录'));
     await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
     expect(store.save).toHaveBeenCalledWith({
-      apiKey: 'secret-key',
+      apiKey: 'deepseek-key',
       retainConversations: true,
     });
     expect(await screen.findByRole('status')).toHaveTextContent('设置已保存');
-    expect(screen.getByRole('status')).not.toHaveTextContent('secret-key');
+    expect(screen.getByRole('status')).not.toHaveTextContent('deepseek-key');
+  });
+
+  it('locks editable settings while a save is pending', async () => {
+    let finishSave: (() => void) | undefined;
+    const store = createStore();
+    vi.mocked(store.save).mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishSave = resolve;
+      }),
+    );
+    render(<SettingsApp store={store} />);
+    const apiKey = await screen.findByLabelText('DeepSeek API Key');
+    const retention = screen.getByLabelText('保留对话记录');
+
+    await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+
+    expect(apiKey).toBeDisabled();
+    expect(retention).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: '清除全部本地对话' }),
+    ).toBeDisabled();
+
+    finishSave?.();
+    expect(await screen.findByRole('status')).toHaveTextContent('设置已保存');
   });
 });

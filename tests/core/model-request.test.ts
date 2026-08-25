@@ -48,6 +48,12 @@ describe('buildModelRequest', () => {
       '优先依据当前文章语境回答',
     );
     expect(request.messages[0]?.content).toContain('不要提供原文出处');
+    expect(request.messages[0]?.content).not.toContain(
+      'Short-term memory keeps the current task state.',
+    );
+    expect(request.messages.at(-1)?.content).toContain(
+      '<article_context>',
+    );
     expect(JSON.stringify(request.messages)).toContain('Short-term memory');
   });
 
@@ -81,6 +87,43 @@ describe('buildModelRequest', () => {
       'assistant',
       'user',
     ]);
+  });
+
+  it('excludes unanswered history and trims complete conversation turns', () => {
+    const history: ChatMessage[] = Array.from({ length: 5 }, (_, index) => [
+      {
+        id: `user-${index}`,
+        role: 'user' as const,
+        content: `Question ${index}`,
+        createdAt: index * 2,
+      },
+      {
+        id: `assistant-${index}`,
+        role: 'assistant' as const,
+        content: `Answer ${index}`,
+        createdAt: index * 2 + 1,
+      },
+    ]).flat();
+    history.push({
+      id: 'failed-user',
+      role: 'user',
+      content: 'Unanswered question',
+      createdAt: 20,
+    });
+
+    const request = buildModelRequest({
+      article,
+      question: 'Current question',
+      relevantChunks: [],
+      history,
+      focus: null,
+    });
+    const historyMessages = request.messages.slice(1, -1);
+
+    expect(historyMessages).toHaveLength(8);
+    expect(historyMessages[0]?.content).toBe('Question 1');
+    expect(historyMessages.at(-1)?.content).toBe('Answer 4');
+    expect(JSON.stringify(request)).not.toContain('Unanswered question');
   });
 
   it('adds a selected image to a multimodal user message', () => {

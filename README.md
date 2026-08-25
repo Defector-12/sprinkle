@@ -10,14 +10,27 @@ Context Reader 是一个 Chrome / Edge Manifest V3 浏览器插件。普通网�
 - 部分读取时提供按需打开的结构诊断、原因详情和重新理解入口
 - 支持 X Article 及使用 `div/span` 渲染的 React 长文正文回退提取
 - 选中文字后通过页面内快捷按钮发起提问
+- 支持点选、双击引用页面图片，以及自由框选可见页面区域提问
 - 点击悬浮球或工具栏图标展开网页内对话卡片
+- 可从悬浮窗打开全页学习工作台，左侧阅读资料、右侧连续对话
+- 学习工作台支持拖动或键盘调整左右栏比例，并共享原页面上下文与对话
+- 工作台按原文位置回填图片、SVG 与 Canvas 图表
+- 工作台划词后就近显示“提问”按钮，并支持显式点图和框选引用
+- 工作台根据正文标题重建可跳转目录，并保留表格与 MathML 数学公式
+- 当前视图新收到的模型回答使用逐字效果；历史、刷新和跨视图同步内容直接完整显示
+- 三轮提问后显示低干扰的问题历史短线，悬停展开摘要并可点击定位
+- 网页版与悬浮窗发送后自动跟随最新消息，输入框随内容增高
+- 两套界面均可最大化输入框；最大化时 Enter 换行，恢复后 Enter 发送
+- 模型回答支持安全的 Markdown/GFM 排版，包括标题、列表、代码、链接和表格
+- 每条引用提问保留发送时的文字或图片映射，历史对话可回看提问依据
 - 支持拖动悬浮球、移动及缩放整个对话框，并可显式停止理解当前页面
 - 基于相关文章片段和连续对话构建模型请求
+- 文字、图片和框选区域问题统一使用 DeepSeek 视觉模型
 - 不展示原文出处、引用卡片或定位入口
 - 按 `tabId + 规范化 URL` 隔离和恢复页面上下文
 - 标签页关闭后清除正文和临时上下文
 - 可选地在本地保留问答文本
-- 单一文本模型接口，用户自行提供 API Key
+- 所有模型请求使用用户提供的 DeepSeek API Key
 
 ## 技术栈
 
@@ -29,7 +42,7 @@ Context Reader 是一个 Chrome / Edge Manifest V3 浏览器插件。普通网�
 
 ## 本地开发
 
-要求 Node.js 20.12+ 和 pnpm。
+要求 Node.js 22.13+ 和 pnpm。
 
 ```bash
 pnpm install
@@ -39,12 +52,11 @@ pnpm dev
 模型实现配置通过本地环境变量提供：
 
 ```bash
-VITE_MODEL_API_URL=https://provider.example/v1/chat/completions
-VITE_MODEL_ID=text-model
-VITE_MODEL_SUPPORTS_VISION=false
+VITE_MODEL_API_URL=https://api.deepseek.com/chat/completions
+VITE_MODEL_ID=deepseek-v4-flash-vision-exp
 ```
 
-这两个值会进入浏览器扩展包，只能用于公开的接口地址和模型标识。API Key 不得写入环境变量或源码，由用户在扩展设置页输入。
+这些值会进入浏览器扩展包，只能用于公开的接口地址和模型标识。DeepSeek API Key 不得写入环境变量或源码，由用户在扩展设置页输入。
 
 ## 构建与加载
 
@@ -75,7 +87,8 @@ pnpm check
 
 - 页面加载后保持休眠；只有用户点击工具栏图标才在本地读取正文。
 - 页面理解本身不会调用模型 API，只有用户发送问题才会请求模型。
-- API Key 只保存在 `browser.storage.local`。
+- `<all_urls>` 用于在原网页和扩展工作台中调用 `captureVisibleTab`；截图只在用户主动点选图片或框选区域时发生，本地图片由用户主动选择或粘贴。
+- DeepSeek API Key 只保存在 `browser.storage.local`。
 - 页面正文只进入 `browser.storage.session`。
 - 标签页关闭后，删除对应的临时页面上下文。
 - 开启“保留对话记录”后，只归档问答文本。
@@ -86,7 +99,7 @@ pnpm check
 entrypoints/
   background.ts       后台上下文与模型编排
   content.ts          页面解析、选词入口与悬浮助手挂载
-  sidepanel/          保留的开发回退界面，不再由工具栏打开
+  study/              全页双栏学习工作台
   options/            API Key 与隐私设置
 src/
   components/         React 界面
@@ -99,6 +112,7 @@ tests/                核心、运行时和组件测试
 ## 当前限制
 
 - 正式使用前必须确定并配置具体模型 API。
-- 当前模型客户端采用 OpenAI-compatible Chat Completions 请求结构。
+- DeepSeek 视觉模型使用 OpenAI-compatible Chat Completions，同时处理文字与图片请求。
 - 不支持 PDF、视频、iframe 内容和跨文章联合问答。
-- 当前固定模型不支持图片输入，图片与区域框选入口暂不显示。
+- 支持上传或粘贴不超过 5 MB 的 JPEG、PNG、GIF 或 WebP 本地图片；页面图片与区域框选仍基于当前可见页面截图，不支持截取视口之外的内容。
+- 学习工作台展示解析后重建的阅读视图，不运行原网页脚本，也不保证还原动态表格和交互组件。

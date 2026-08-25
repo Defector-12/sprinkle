@@ -63,6 +63,25 @@ describe('article retrieval', () => {
     );
   });
 
+  it('splits a single oversized block to respect the chunk limit', () => {
+    const chunks = createArticleChunks(
+      [
+        {
+          id: 'large',
+          type: 'paragraph',
+          text: 'x'.repeat(450),
+          section: 'Large section',
+          order: 0,
+        },
+      ],
+      180,
+    );
+
+    expect(chunks).toHaveLength(3);
+    expect(chunks.every((chunk) => chunk.text.length <= 180)).toBe(true);
+    expect(chunks.map((chunk) => chunk.text).join('')).toHaveLength(450);
+  });
+
   it('ranks chunks related to the question and focused text first', () => {
     const chunks = createArticleChunks(blocks, 180);
 

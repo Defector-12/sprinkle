@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { extractArticle } from '../../src/core/article-extractor.ts';
 
@@ -41,9 +41,145 @@ describe('extractArticle', () => {
         alt: 'Reader architecture',
         caption: 'Content script to model request flow',
         section: 'Retrieval',
+        order: 5,
       }),
     ]);
     expect(article.isPartial).toBe(false);
+  });
+
+  it('extracts inline SVG and canvas charts with their document positions', () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(
+      'data:image/png;base64,chart',
+    );
+    document.body.innerHTML = `
+      <article>
+        <h1>Benchmark report</h1>
+        <p>${'Introduction to the benchmark. '.repeat(4)}</p>
+        <figure>
+          <svg role="img" aria-label="Accuracy by model" viewBox="0 0 400 200">
+            <rect width="120" height="80"></rect>
+          </svg>
+          <figcaption>Figure 1: Accuracy comparison</figcaption>
+        </figure>
+        <h2>Latency</h2>
+        <canvas aria-label="Latency by model" width="400" height="200"></canvas>
+        <p>${'Latency results and analysis. '.repeat(4)}</p>
+      </article>
+    `;
+
+    const article = extractArticle(
+      document,
+      'https://example.com/benchmark',
+    );
+
+    expect(article.images).toEqual([
+      expect.objectContaining({
+        alt: 'Accuracy by model',
+        caption: 'Figure 1: Accuracy comparison',
+        order: 2,
+        src: expect.stringContaining('data:image/svg+xml'),
+      }),
+      expect.objectContaining({
+        alt: 'Latency by model',
+        order: 3,
+        src: 'data:image/png;base64,chart',
+      }),
+    ]);
+  });
+
+  it('extracts table structure and rendered math without flattening them to text', () => {
+    document.body.innerHTML = `
+      <article>
+        <h1>Kimi K3 architecture</h1>
+        <p>${'Architecture overview. '.repeat(5)}</p>
+        <ul class="article-toc">
+          <li><a href="#key-numbers">Key Numbers</a></li>
+          <li><a href="#delta-rule">Delta Rule</a></li>
+          <li><a href="#conclusion">Conclusion</a></li>
+        </ul>
+        <h2>Key Numbers</h2>
+        <table>
+          <caption>Model scale</caption>
+          <thead>
+            <tr><th>Metric 指标</th><th>Value 值</th></tr>
+          </thead>
+          <tbody>
+            <tr><th>Total Parameters 总参数</th><td>2.78 Trillion</td></tr>
+            <tr><th>Layers 层</th><td>93</td></tr>
+          </tbody>
+        </table>
+        <h2>Delta Rule</h2>
+        <p>
+          The update is
+          <span class="katex">
+            <span class="katex-mathml">
+              <math display="block" onclick="alert('xss')">
+                <semantics>
+                  <mrow><mi>I</mi><mo>−</mo><msub><mi>β</mi><mi>t</mi></msub></mrow>
+                  <annotation encoding="application/x-tex">I - \\beta_t</annotation>
+                  <script>alert('xss')</script>
+                </semantics>
+              </math>
+            </span>
+            <span class="katex-html" aria-hidden="true">visual fallback</span>
+          </span>
+          before writing memory.
+        </p>
+      </article>
+    `;
+
+    const article = extractArticle(
+      document,
+      'https://example.com/kimi-k3',
+    );
+
+    expect(article.tables).toEqual([
+      expect.objectContaining({
+        caption: 'Model scale',
+        section: 'Key Numbers',
+        order: 3,
+        rows: [
+          {
+            cells: [
+              expect.objectContaining({ text: 'Metric 指标', header: true }),
+              expect.objectContaining({ text: 'Value 值', header: true }),
+            ],
+          },
+          {
+            cells: [
+              expect.objectContaining({
+                text: 'Total Parameters 总参数',
+                header: true,
+              }),
+              expect.objectContaining({ text: '2.78 Trillion', header: false }),
+            ],
+          },
+          {
+            cells: [
+              expect.objectContaining({ text: 'Layers 层', header: true }),
+              expect.objectContaining({ text: '93', header: false }),
+            ],
+          },
+        ],
+      }),
+    ]);
+    expect(article.formulas).toEqual([
+      expect.objectContaining({
+        tex: 'I - \\beta_t',
+        mathml: expect.stringContaining('<math'),
+        section: 'Delta Rule',
+        order: 5,
+        display: 'block',
+      }),
+    ]);
+    expect(article.formulas?.[0]?.mathml).not.toContain('onclick');
+    expect(article.formulas?.[0]?.mathml).not.toContain('script');
+    expect(article.blocks.map((block) => block.text).join(' ')).not.toContain(
+      'visual fallback',
+    );
+    expect(article.blocks.map((block) => block.text).join(' ')).not.toContain(
+      'Conclusion',
+    );
   });
 
   it('marks pages with very little readable content as partial', () => {

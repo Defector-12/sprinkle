@@ -7,11 +7,7 @@ export default defineConfig({
     description: '在当前技术文章的上下文中提问。',
     version: '0.1.0',
     permissions: ['activeTab', 'scripting', 'storage', 'tabs'],
-    host_permissions: [
-      'http://*/*',
-      'https://*/*',
-      'https://api.deepseek.com/*',
-    ],
+    host_permissions: ['<all_urls>'],
     action: {
       default_title: '打开 Context Reader',
     },

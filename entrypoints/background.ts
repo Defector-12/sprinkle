@@ -1,22 +1,30 @@
 import { browser, type Browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
 
-import { ContextRegistry } from '../src/core/context-registry.ts';
+import {
+  completeQuestionTurn,
+  snapshotMessageReference,
+} from '../src/core/conversation-turn.ts';
 import { buildModelRequest } from '../src/core/model-request.ts';
+import { createPageContext } from '../src/core/page-context.ts';
 import {
   createArticleChunks,
   retrieveRelevantChunks,
 } from '../src/core/retrieval.ts';
+import { createPageKey, normalizePageUrl } from '../src/core/url.ts';
 import type {
+  AnswerModel,
   ArticleDocument,
   ChatMessage,
   FocusContext,
+  MessageReference,
   PageContext,
 } from '../src/core/types.ts';
 import {
   ConversationArchive,
   SessionContextRepository,
 } from '../src/runtime/context-repository.ts';
+import { extensionUrl } from '../src/runtime/extension-url.ts';
 import type {
   ContentRequest,
   ExtensionRequest,
@@ -28,15 +36,21 @@ import {
   localStorageArea,
   sessionStorageArea,
 } from '../src/runtime/settings-store.ts';
+import { captureVisibleTabForSender } from '../src/runtime/screenshot.ts';
 
 const environment = import.meta.env;
 const modelClient = new OpenAiCompatibleModelClient({
-  endpoint: environment.VITE_MODEL_API_URL?.trim() ?? '',
-  model: environment.VITE_MODEL_ID?.trim() ?? '',
-  supportsVision: environment.VITE_MODEL_SUPPORTS_VISION === 'true',
+  endpoint:
+    environment.VITE_MODEL_API_URL?.trim() ||
+    'https://api.deepseek.com/chat/completions',
+  model:
+    environment.VITE_MODEL_ID?.trim() ||
+    'deepseek-v4-flash-vision-exp',
 });
 const contexts = new SessionContextRepository(sessionStorageArea());
 const conversations = new ConversationArchive(localStorageArea());
+const pageGenerations = new Map<string, number>();
+const answeringPages = new Map<string, symbol>();
 
 function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : '操作失败，请重试。';
@@ -59,6 +73,46 @@ interface PageTab {
   url: string;
   title: string;
   windowId: number;
+}
+
+class StalePageContextError extends Error {}
+class StalePageOperationError extends Error {}
+
+function currentPageGeneration(key: string): number {
+  return pageGenerations.get(key) ?? 0;
+}
+
+function invalidatePageOperations(key: string): number {
+  const generation = currentPageGeneration(key) + 1;
+  pageGenerations.set(key, generation);
+  answeringPages.delete(key);
+  return generation;
+}
+
+function requireCurrentPageOperation(key: string, generation: number): void {
+  if (currentPageGeneration(key) !== generation) {
+    throw new StalePageOperationError('页面状态已更新，已忽略过期操作。');
+  }
+}
+
+async function tabMatchesUrl(tabId: number, url: string): Promise<boolean> {
+  try {
+    const tab = await browser.tabs.get(tabId);
+    return (
+      isSupportedUrl(tab.url) &&
+      normalizePageUrl(tab.url) === normalizePageUrl(url)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function requireMatchingTab(tabId: number, url: string): Promise<void> {
+  if (!(await tabMatchesUrl(tabId, url))) {
+    throw new StalePageContextError(
+      '原页面已关闭或跳转，请在当前页面重新打开 Context Reader。',
+    );
+  }
 }
 
 async function activeTab(): Promise<PageTab> {
@@ -96,10 +150,15 @@ async function requestTab(
 
 async function notify(context: PageContext): Promise<void> {
   const event = { type: 'context:changed', context } as const;
-  await Promise.all([
+  const tasks: Promise<unknown>[] = [
     browser.runtime.sendMessage(event).catch(() => undefined),
-    browser.tabs.sendMessage(context.tabId, event).catch(() => undefined),
-  ]);
+  ];
+  if (await tabMatchesUrl(context.tabId, context.url)) {
+    tasks.push(
+      browser.tabs.sendMessage(context.tabId, event).catch(() => undefined),
+    );
+  }
+  await Promise.all(tasks);
 }
 
 async function getOrCreateContext(tab: {
@@ -110,8 +169,7 @@ async function getOrCreateContext(tab: {
   const stored = await contexts.get(tab.id, tab.url);
   if (stored) return stored;
 
-  const registry = new ContextRegistry();
-  let context = registry.getOrCreate(tab.id, tab.url, tab.title);
+  let context = createPageContext(tab.id, tab.url, tab.title);
   const settings = await loadSettings();
   if (settings.retainConversations) {
     const messages = await conversations.load(tab.url);
@@ -122,6 +180,8 @@ async function getOrCreateContext(tab: {
 }
 
 async function activatePage(tab: PageTab): Promise<PageContext> {
+  const operationKey = createPageKey(tab.id, tab.url);
+  const generation = invalidatePageOperations(operationKey);
   const current = await getOrCreateContext(tab);
   const parsing: PageContext = {
     ...current,
@@ -136,6 +196,8 @@ async function activatePage(tab: PageTab): Promise<PageContext> {
     const article = (await browser.tabs.sendMessage(tab.id, {
       type: 'page:extract',
     } satisfies ContentRequest)) as ArticleDocument;
+    requireCurrentPageOperation(operationKey, generation);
+    await requireMatchingTab(tab.id, tab.url);
     const ready: PageContext = {
       ...parsing,
       title: article.title,
@@ -148,6 +210,11 @@ async function activatePage(tab: PageTab): Promise<PageContext> {
     await notify(ready);
     return ready;
   } catch (cause) {
+    if (cause instanceof StalePageOperationError) throw cause;
+    if (cause instanceof StalePageContextError) {
+      await contexts.deletePage(tab.id, tab.url);
+      throw cause;
+    }
     const failed: PageContext = {
       ...parsing,
       status: 'failed',
@@ -163,18 +230,24 @@ async function activatePage(tab: PageTab): Promise<PageContext> {
 function message(
   role: ChatMessage['role'],
   content: string,
+  answeredBy?: AnswerModel,
+  reference?: MessageReference,
 ): ChatMessage {
   return {
     id: crypto.randomUUID(),
     role,
     content,
     createdAt: Date.now(),
+    ...(reference ? { reference } : {}),
+    ...(answeredBy ? { answeredBy } : {}),
   };
 }
 
-async function askPage(
+async function performAskPage(
   question: string,
   tab: PageTab,
+  operationKey: string,
+  generation: number,
 ): Promise<PageContext> {
   const current = await getOrCreateContext(tab);
   if (!current.article || !['ready', 'partial'].includes(current.status)) {
@@ -182,9 +255,6 @@ async function askPage(
   }
 
   const settings = await loadSettings();
-  if (!settings.apiKey.trim()) {
-    throw new Error('请先在设置中填写 API Key。');
-  }
 
   const chunks = createArticleChunks(current.article.blocks);
   const relevantChunks = retrieveRelevantChunks(chunks, {
@@ -199,10 +269,19 @@ async function askPage(
     history: current.messages,
     focus: current.focus,
   });
+  if (!settings.apiKey.trim()) {
+    throw new Error('请先在设置中填写 DeepSeek API Key。');
+  }
+  const userMessage = message(
+    'user',
+    question,
+    undefined,
+    snapshotMessageReference(current.focus),
+  );
   const withQuestion: PageContext = {
     ...current,
     status: 'answering',
-    messages: [...current.messages, message('user', question)],
+    messages: [...current.messages, userMessage],
     updatedAt: Date.now(),
   };
   await contexts.save(withQuestion);
@@ -210,19 +289,51 @@ async function askPage(
 
   try {
     const answer = await modelClient.complete(settings.apiKey, request);
-    const completed: PageContext = {
-      ...withQuestion,
-      status: current.article.isPartial ? 'partial' : 'ready',
-      messages: [...withQuestion.messages, message('assistant', answer)],
-      updatedAt: Date.now(),
-    };
-    await contexts.save(completed);
-    if (settings.retainConversations) {
-      await conversations.save(completed);
+    requireCurrentPageOperation(operationKey, generation);
+    await requireMatchingTab(tab.id, tab.url);
+    const latest = await contexts.get(tab.id, tab.url);
+    if (
+      !latest?.article ||
+      latest.status !== 'answering' ||
+      !latest.messages.some((item) => item.id === userMessage.id)
+    ) {
+      throw new StalePageOperationError(
+        '页面状态已更新，已忽略过期回答。',
+      );
     }
-    await notify(completed);
-    return completed;
+    const completed = completeQuestionTurn(
+      latest,
+      message('assistant', answer, 'deepseek'),
+    );
+    if (latest.updatedAt > withQuestion.updatedAt) {
+      completed.focus = latest.focus;
+    }
+    await contexts.save(completed);
+    let finalized = completed;
+    if (settings.retainConversations) {
+      try {
+        await conversations.save(completed);
+      } catch {
+        finalized = {
+          ...completed,
+          warning: [completed.warning, '回答已生成，但本地对话归档失败。']
+            .filter(Boolean)
+            .join('；'),
+        };
+        await contexts.save(finalized);
+      }
+    }
+    await notify(finalized);
+    return finalized;
   } catch (cause) {
+    if (cause instanceof StalePageOperationError) throw cause;
+    requireCurrentPageOperation(operationKey, generation);
+    if (!(await tabMatchesUrl(tab.id, tab.url))) {
+      await contexts.deletePage(tab.id, tab.url);
+      throw new StalePageContextError(
+        '原页面已关闭或跳转，请在当前页面重新打开 Context Reader。',
+      );
+    }
     const recovered: PageContext = {
       ...withQuestion,
       status: current.article.isPartial ? 'partial' : 'ready',
@@ -234,7 +345,28 @@ async function askPage(
   }
 }
 
+async function askPage(
+  question: string,
+  tab: PageTab,
+): Promise<PageContext> {
+  const operationKey = createPageKey(tab.id, tab.url);
+  if (answeringPages.has(operationKey)) {
+    throw new Error('当前页面正在生成回答，请稍候。');
+  }
+  const answerToken = Symbol(operationKey);
+  answeringPages.set(operationKey, answerToken);
+  const generation = currentPageGeneration(operationKey);
+  try {
+    return await performAskPage(question, tab, operationKey, generation);
+  } finally {
+    if (answeringPages.get(operationKey) === answerToken) {
+      answeringPages.delete(operationKey);
+    }
+  }
+}
+
 async function clearPage(tab: PageTab): Promise<PageContext> {
+  invalidatePageOperations(createPageKey(tab.id, tab.url));
   await contexts.deletePage(tab.id, tab.url);
   await conversations.delete(tab.url);
   const cleared = await getOrCreateContext(tab);
@@ -275,6 +407,57 @@ async function setFocusFromPage(
   return updated;
 }
 
+async function clearFocus(tab: PageTab): Promise<PageContext> {
+  const current = await getOrCreateContext(tab);
+  const updated: PageContext = {
+    ...current,
+    focus: null,
+    updatedAt: Date.now(),
+  };
+  await contexts.save(updated);
+  await notify(updated);
+  return updated;
+}
+
+async function studyContext(
+  tabId: number,
+  url: string,
+): Promise<PageContext> {
+  await requireMatchingTab(tabId, url);
+  const context = await contexts.get(tabId, url);
+  if (!context?.article || !['ready', 'partial', 'answering'].includes(context.status)) {
+    throw new Error('原页面上下文已失效，请返回原页面重新打开学习工作台。');
+  }
+  return context;
+}
+
+async function setStudyFocus(
+  tabId: number,
+  url: string,
+  focus: FocusContext | null,
+): Promise<PageContext> {
+  const current = await studyContext(tabId, url);
+  const updated: PageContext = {
+    ...current,
+    focus,
+    updatedAt: Date.now(),
+  };
+  await contexts.save(updated);
+  await notify(updated);
+  return updated;
+}
+
+async function openStudy(tab: PageTab): Promise<void> {
+  await studyContext(tab.id, tab.url);
+  const params = new URLSearchParams({
+    tabId: String(tab.id),
+    url: tab.url,
+  });
+  await browser.tabs.create({
+    url: extensionUrl(`/study.html?${params.toString()}`),
+  });
+}
+
 async function handleRequest(
   request: ExtensionRequest,
   sender: Browser.runtime.MessageSender,
@@ -292,6 +475,41 @@ async function handleRequest(
         return success(
           await askPage(request.question, await requestTab(sender)),
         );
+      case 'study:open':
+        await openStudy(await requestTab(sender));
+        return success(undefined);
+      case 'study:context:get':
+        return success(await studyContext(request.tabId, request.url));
+      case 'study:chat:ask':
+        return success(
+          await askPage(request.question, {
+            id: request.tabId,
+            url: request.url,
+            title: (await studyContext(request.tabId, request.url)).title,
+            windowId: sender.tab?.windowId ?? 0,
+          }),
+        );
+      case 'study:focus:set':
+        return success(
+          await setStudyFocus(request.tabId, request.url, request.focus),
+        );
+      case 'study:focus:clear':
+        return success(
+          await setStudyFocus(request.tabId, request.url, null),
+        );
+      case 'study:source:open':
+        await studyContext(request.tabId, request.url);
+        {
+          const sourceTab = await browser.tabs.update(request.tabId, {
+            active: true,
+          });
+          if (sourceTab?.windowId != null) {
+            await browser.windows.update(sourceTab.windowId, {
+              focused: true,
+            });
+          }
+        }
+        return success(undefined);
       case 'picker:image:start':
         await startPicker('picker:image:start', await requestTab(sender));
         return success(undefined);
@@ -300,12 +518,16 @@ async function handleRequest(
         return success(undefined);
       case 'focus:set':
         return success(await setFocusFromPage(request.focus, sender));
+      case 'focus:clear':
+        return success(await clearFocus(await requestTab(sender)));
       case 'capture:visible': {
-        if (!sender.tab) throw new Error('无法识别当前标签页。');
+        if (sender.tab?.id == null) throw new Error('无法识别当前标签页。');
         return success(
-          await browser.tabs.captureVisibleTab(sender.tab.windowId, {
-            format: 'png',
-          }),
+          await captureVisibleTabForSender(
+            sender.tab.id,
+            sender.tab.windowId,
+            { format: 'png' },
+          ),
         );
       }
       case 'settings:open':

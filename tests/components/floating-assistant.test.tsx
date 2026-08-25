@@ -6,7 +6,8 @@ import {
   FloatingAssistant,
   type FloatingAssistantBridge,
 } from '../../src/components/FloatingAssistant.tsx';
-import type { PageContext } from '../../src/core/types.ts';
+import type { ImageFocus, PageContext } from '../../src/core/types.ts';
+import { publishAssistantOpen } from '../../src/runtime/assistant-events.ts';
 
 const readyContext: PageContext = {
   key: '7:https://example.com/post',
@@ -83,6 +84,16 @@ function createBridge(
     deactivate: vi.fn().mockResolvedValue(unactivatedContext),
     hasApiKey: vi.fn().mockResolvedValue(true),
     ask: vi.fn().mockResolvedValue(context),
+    startImagePicker: vi.fn().mockResolvedValue(undefined),
+    startRegionPicker: vi.fn().mockResolvedValue(undefined),
+    setImageFocus: vi
+      .fn()
+      .mockImplementation(async (focus: ImageFocus) => ({
+        ...context,
+        focus,
+      })),
+    clearFocus: vi.fn().mockResolvedValue({ ...context, focus: null }),
+    openStudy: vi.fn().mockResolvedValue(undefined),
     openSettings: vi.fn().mockResolvedValue(undefined),
     subscribe: vi.fn().mockReturnValue(() => undefined),
     ...overrides,
@@ -107,7 +118,11 @@ describe('FloatingAssistant', () => {
     act(() => {
       window.dispatchEvent(new CustomEvent('context-reader:open'));
     });
+    expect(bridge.activate).not.toHaveBeenCalled();
 
+    act(() => {
+      publishAssistantOpen();
+    });
     expect(bridge.activate).toHaveBeenCalledOnce();
     expect(
       await screen.findByRole('dialog', { name: 'Context Reader 对话' }),
@@ -134,6 +149,80 @@ describe('FloatingAssistant', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('shows restored answers immediately without replaying the typewriter', async () => {
+    const historicalAnswer =
+      'This answer was completed before the current view was mounted. '
+        .repeat(8)
+        .trim();
+    const bridge = createBridge({
+      ...readyContext,
+      messages: [
+        {
+          id: 'historical-answer',
+          role: 'assistant',
+          content: historicalAnswer,
+          createdAt: 1,
+          answeredBy: 'deepseek',
+        },
+      ],
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+
+    expect(screen.getByText(historicalAnswer)).toBeVisible();
+  });
+
+  it('shows answers created in another view without replaying them', async () => {
+    let publishContext: ((context: PageContext) => void) | undefined;
+    const bridge = createBridge(readyContext, {
+      subscribe: vi.fn((listener: (context: PageContext) => void) => {
+        publishContext = listener;
+        return () => undefined;
+      }),
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    const externalAnswer =
+      'This answer was completed in the study workspace. '.repeat(8).trim();
+
+    await act(async () => {
+      publishContext?.({
+        ...readyContext,
+        messages: [
+          {
+            id: 'study-answer',
+            role: 'assistant',
+            content: externalAnswer,
+            createdAt: 2,
+            answeredBy: 'deepseek',
+          },
+        ],
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(externalAnswer)).toBeVisible();
+  });
+
+  it('opens the full-page study workspace from the conversation header', async () => {
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: '打开学习工作台' }),
+    );
+
+    expect(bridge.openStudy).toHaveBeenCalledOnce();
+  });
+
   it('opens from a selection event and shows the selected text as context', async () => {
     const bridge = createBridge({
       ...readyContext,
@@ -146,17 +235,148 @@ describe('FloatingAssistant', () => {
     render(<FloatingAssistant bridge={bridge} />);
 
     act(() => {
-      window.dispatchEvent(
-        new CustomEvent('context-reader:open', {
-          detail: { activate: false },
-        }),
-      );
+      publishAssistantOpen({ activate: false });
     });
 
     expect(
       await screen.findByRole('dialog', { name: 'Context Reader 对话' }),
     ).toBeVisible();
     expect(screen.getByText('Mixture of Experts')).toBeVisible();
+  });
+
+  it('offers accessible image and region tools from the floating conversation', async () => {
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: '点选页面图片' }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: '打开 Context Reader' }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: '框选页面区域' }),
+    );
+
+    expect(bridge.startImagePicker).toHaveBeenCalledOnce();
+    expect(bridge.startRegionPicker).toHaveBeenCalledOnce();
+  });
+
+  it('uploads a local image into the current reference', async () => {
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    const picker = screen.getByLabelText(
+      '选择本地图片文件',
+    ) as HTMLInputElement;
+    const openPicker = vi.spyOn(picker, 'click');
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '上传本地图片' }),
+    );
+    expect(openPicker).toHaveBeenCalledOnce();
+
+    fireEvent.change(picker, {
+      target: {
+        files: [
+          new File(['pixels'], 'architecture.png', {
+            type: 'image/png',
+          }),
+        ],
+      },
+    });
+
+    await waitFor(() =>
+      expect(bridge.setImageFocus).toHaveBeenCalledWith({
+        type: 'image',
+        imageUrl: 'data:image/png;base64,cGl4ZWxz',
+        alt: 'architecture.png',
+        text: 'architecture.png',
+        section: '本地上传',
+        source: 'upload',
+      }),
+    );
+    expect(
+      await screen.findByRole('img', { name: '已引用图片预览' }),
+    ).toHaveAttribute('src', 'data:image/png;base64,cGl4ZWxz');
+  });
+
+  it('uses a pasted clipboard image as the current reference', async () => {
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    const textarea = screen.getByRole('textbox', {
+      name: '向当前文章提问',
+    });
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        files: [
+          new File(['clipboard'], 'pasted-image.png', {
+            type: 'image/png',
+          }),
+        ],
+        items: [],
+      },
+    });
+
+    await waitFor(() =>
+      expect(bridge.setImageFocus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          imageUrl: 'data:image/png;base64,Y2xpcGJvYXJk',
+          alt: 'pasted-image.png',
+          source: 'upload',
+        }),
+      ),
+    );
+
+    fireEvent.paste(textarea, {
+      clipboardData: { files: [], items: [] },
+    });
+    expect(bridge.setImageFocus).toHaveBeenCalledOnce();
+  });
+
+  it('previews an image reference without a model hint and can remove it', async () => {
+    const imageContext: PageContext = {
+      ...readyContext,
+      focus: {
+        type: 'image',
+        imageUrl: 'data:image/png;base64,c2NyZWVuc2hvdA==',
+        alt: 'Agent memory architecture',
+        text: 'Agent memory architecture',
+        section: 'Architecture',
+        source: 'screenshot',
+      },
+    };
+    const bridge = createBridge(imageContext);
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+
+    expect(
+      screen.getByRole('img', { name: '已引用图片预览' }),
+    ).toHaveAttribute('src', imageContext.focus?.type === 'image'
+      ? imageContext.focus.imageUrl
+      : '');
+    expect(
+      screen.queryByText('含图片，将使用 DeepSeek 视觉模型'),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '移除图片引用' }),
+    );
+    expect(bridge.clearFocus).toHaveBeenCalledOnce();
   });
 
   it('sends a question and renders the answer inside the same card', async () => {
@@ -174,6 +394,7 @@ describe('FloatingAssistant', () => {
           role: 'assistant',
           content: '这里指模型按输入选择部分专家网络参与计算。',
           createdAt: 2,
+          answeredBy: 'deepseek',
         },
       ],
     };
@@ -190,9 +411,220 @@ describe('FloatingAssistant', () => {
     await userEvent.keyboard('{Enter}');
 
     expect(bridge.ask).toHaveBeenCalledWith('这里的 MoE 是什么意思？');
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText('这里指模型按输入选择部分专家网络参与计算。'),
+        ).toBeVisible();
+      },
+      { timeout: 2_000 },
+    );
+    expect(screen.getByText('DeepSeek')).toBeVisible();
+  });
+
+  it('scrolls to the newest conversation content after sending', async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const answeredContext: PageContext = {
+      ...readyContext,
+      messages: [
+        {
+          id: 'user-latest',
+          role: 'user',
+          content: '最新问题',
+          createdAt: 1,
+        },
+        {
+          id: 'assistant-latest',
+          role: 'assistant',
+          content: '最新回答',
+          createdAt: 2,
+          answeredBy: 'deepseek',
+        },
+      ],
+    };
+    const bridge = createBridge(readyContext, {
+      ask: vi.fn().mockResolvedValue(answeredContext),
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    scrollIntoView.mockClear();
+
+    const input = screen.getByRole('textbox', { name: '向当前文章提问' });
+    await userEvent.type(input, '最新问题');
+    await userEvent.keyboard('{Enter}');
+
+    await waitFor(() =>
+      expect(scrollIntoView).toHaveBeenCalledWith({
+        behavior: 'smooth',
+        block: 'end',
+      }),
+    );
+  });
+
+  it('auto-grows and maximizes the composer while Enter inserts a newline', async () => {
+    const bridge = createBridge();
+    render(<FloatingAssistant bridge={bridge} />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    const input = screen.getByRole('textbox', { name: '向当前文章提问' });
+    Object.defineProperty(input, 'scrollHeight', {
+      configurable: true,
+      value: 180,
+    });
+
+    await userEvent.type(input, '第一行很长的输入内容');
+    expect(input).toHaveStyle({ height: '180px' });
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '最大化输入框' }),
+    );
+    expect(input).toHaveAttribute('aria-expanded', 'true');
     expect(
-      await screen.findByText('这里指模型按输入选择部分专家网络参与计算。'),
+      screen.getByRole('button', { name: '恢复输入框' }),
     ).toBeVisible();
+
+    await userEvent.type(input, '{Enter}第二行');
+    expect(input).toHaveValue('第一行很长的输入内容\n第二行');
+    expect(bridge.ask).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '恢复输入框' }),
+    );
+    await userEvent.type(input, '{Enter}');
+    expect(bridge.ask).toHaveBeenCalledWith('第一行很长的输入内容\n第二行');
+  });
+
+  it('labels each answer with its actual model and keeps a fallback for old messages', async () => {
+    const bridge = createBridge({
+      ...readyContext,
+      messages: [
+        {
+          id: 'assistant-doubao',
+          role: 'assistant',
+          content: '这是图片回答。',
+          createdAt: 1,
+          answeredBy: 'doubao',
+        },
+        {
+          id: 'assistant-deepseek',
+          role: 'assistant',
+          content: '这是文本追问回答。',
+          createdAt: 2,
+          answeredBy: 'deepseek',
+        },
+        {
+          id: 'assistant-legacy',
+          role: 'assistant',
+          content: '这是升级前的历史回答。',
+          createdAt: 3,
+        },
+      ],
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+
+    expect(screen.getByText('Doubao')).toBeVisible();
+    expect(screen.getByText('DeepSeek')).toBeVisible();
+    expect(screen.getByText('助手')).toBeVisible();
+  });
+
+  it('renders assistant Markdown and shows the reference used by the user', async () => {
+    const bridge = createBridge({
+      ...readyContext,
+      messages: [
+        {
+          id: 'user-referenced',
+          role: 'user',
+          content: '这里的工作记忆有什么作用？',
+          createdAt: 1,
+          reference: {
+            type: 'text',
+            text: 'Working memory carries the current reasoning state.',
+            section: 'Architecture',
+          },
+        },
+        {
+          id: 'assistant-markdown',
+          role: 'assistant',
+          content: [
+            '## 核心作用',
+            '',
+            '**工作记忆**主要负责：',
+            '',
+            '- 保存当前状态',
+            '- 支持下一步推理',
+            '',
+            '`memory.update()` 会更新状态。',
+            '',
+            '[查看资料](https://example.com/docs)',
+            '',
+            '<script>window.__unsafe = true</script>',
+          ].join('\n'),
+          createdAt: 2,
+          answeredBy: 'deepseek',
+        },
+      ],
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+
+    expect(
+      await screen.findByRole(
+        'heading',
+        { name: '核心作用', level: 2 },
+        { timeout: 3_000 },
+      ),
+    ).toBeVisible();
+    expect(
+      await screen.findByText(
+        '工作记忆',
+        { selector: 'strong' },
+        { timeout: 3_000 },
+      ),
+    ).toBeVisible();
+    expect(
+      await screen.findByText(
+        '保存当前状态',
+        undefined,
+        { timeout: 3_000 },
+      ),
+    ).toBeVisible();
+    expect(
+      await screen.findByText(
+        'memory.update()',
+        { selector: 'code' },
+        { timeout: 3_000 },
+      ),
+    ).toBeVisible();
+    expect(
+      await screen.findByRole(
+        'link',
+        { name: '查看资料' },
+        { timeout: 3_000 },
+      ),
+    ).toHaveAttribute('target', '_blank');
+    expect(screen.getByRole('note', { name: '提问引用' })).toHaveTextContent(
+      'Working memory carries the current reasoning state.',
+    );
+    expect(
+      screen
+        .getByRole('dialog', { name: 'Context Reader 对话' })
+        .querySelector('script'),
+    ).toBeNull();
+    expect(screen.queryByText('window.__unsafe = true')).not.toBeInTheDocument();
   });
 
   it('shows an explicit understanding state while the page is being parsed', async () => {
@@ -203,7 +635,7 @@ describe('FloatingAssistant', () => {
     await waitFor(() => expect(bridge.initialize).toHaveBeenCalledOnce());
 
     act(() => {
-      window.dispatchEvent(new CustomEvent('context-reader:open'));
+      publishAssistantOpen();
     });
 
     expect(await screen.findByRole('status')).toHaveTextContent(
@@ -371,7 +803,7 @@ describe('FloatingAssistant', () => {
     pointer('pointerup', 200, midY);
 
     act(() => {
-      window.dispatchEvent(new CustomEvent('context-reader:open'));
+      publishAssistantOpen();
     });
 
     const dialog = await screen.findByRole('dialog', {

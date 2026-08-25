@@ -3,32 +3,26 @@ import { createRoot, type Root } from 'react-dom/client';
 import { browser } from 'wxt/browser';
 import { defineContentScript } from 'wxt/utils/define-content-script';
 
-import {
-  FLOATING_ASSISTANT_ACTIVE_EVENT,
-  FLOATING_ASSISTANT_OPEN_EVENT,
-  FloatingAssistant,
-} from '../src/components/FloatingAssistant.tsx';
+import { FloatingAssistant } from '../src/components/FloatingAssistant.tsx';
 import { extractArticle } from '../src/core/article-extractor.ts';
 import type { FocusContext } from '../src/core/types.ts';
+import {
+  publishAssistantOpen,
+  subscribeAssistantActive,
+} from '../src/runtime/assistant-events.ts';
 import { ContentAssistantBridge } from '../src/runtime/content-assistant-bridge.ts';
-import type {
-  ContentRequest,
-  ExtensionRequest,
-  RuntimeResult,
-} from '../src/runtime/messages.ts';
+import type { ContentRequest } from '../src/runtime/messages.ts';
+import { sendRuntimeRequest } from '../src/runtime/runtime-client.ts';
+import {
+  currentViewportMetrics,
+  mapViewportRectToImage,
+} from '../src/runtime/screenshot.ts';
 import floatingAssistantCss from '../src/styles/floating-assistant.css?inline';
 
 const UI_ATTRIBUTE = 'data-context-reader-ui';
-
-async function sendRuntime<T>(request: ExtensionRequest): Promise<T> {
-  const response = (await browser.runtime.sendMessage(
-    request,
-  )) as RuntimeResult<T>;
-  if (!response?.ok) {
-    throw new Error(response?.error || '扩展后台没有响应');
-  }
-  return response.data;
-}
+const CONTENT_RUNTIME_KEY = '__contextReaderRuntimeMounted__';
+type RuntimeGlobal = typeof globalThis &
+  Partial<Record<typeof CONTENT_RUNTIME_KEY, boolean>>;
 
 function cleanText(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, ' ').trim();
@@ -137,35 +131,31 @@ function installTextSelection(openAssistant: () => void): () => void {
       section: sectionFor(selectedElement),
     };
     hide();
-    await sendRuntime({ type: 'focus:set', focus })
+    await sendRuntimeRequest({ type: 'focus:set', focus })
       .then(openAssistant)
       .catch(() => undefined);
   };
-  const onActiveChange = (event: Event) => {
-    enabled = Boolean((event as CustomEvent<boolean>).detail);
+  const onActiveChange = (active: boolean) => {
+    enabled = active;
     if (!enabled) hide();
   };
 
   document.addEventListener('mouseup', onMouseUp);
   document.addEventListener('scroll', hide, true);
-  window.addEventListener(FLOATING_ASSISTANT_ACTIVE_EVENT, onActiveChange);
+  const unsubscribeActive = subscribeAssistantActive(onActiveChange);
   button.addEventListener('click', onButtonClick);
 
   return () => {
     document.removeEventListener('mouseup', onMouseUp);
     document.removeEventListener('scroll', hide, true);
-    window.removeEventListener(FLOATING_ASSISTANT_ACTIVE_EVENT, onActiveChange);
+    unsubscribeActive();
     button.removeEventListener('click', onButtonClick);
     button.remove();
   };
 }
 
 function openFloatingAssistant(activate = false): void {
-  window.dispatchEvent(
-    new CustomEvent(FLOATING_ASSISTANT_OPEN_EVENT, {
-      detail: { activate },
-    }),
-  );
+  publishAssistantOpen({ activate });
 }
 
 interface MountedAssistant {
@@ -231,12 +221,19 @@ function loadImage(source: string): Promise<HTMLImageElement> {
 }
 
 async function cropVisibleScreenshot(rect: DOMRect): Promise<string> {
-  const screenshot = await sendRuntime<string>({ type: 'capture:visible' });
+  const screenshot = await sendRuntimeRequest<string>({
+    type: 'capture:visible',
+  });
   const source = await loadImage(screenshot);
-  const scaleX = source.naturalWidth / window.innerWidth;
-  const scaleY = source.naturalHeight / window.innerHeight;
-  const width = Math.max(1, Math.round(rect.width * scaleX));
-  const height = Math.max(1, Math.round(rect.height * scaleY));
+  const crop = mapViewportRectToImage(
+    rect,
+    source.naturalWidth,
+    source.naturalHeight,
+    currentViewportMetrics(),
+  );
+  const outputScale = Math.min(1, 1600 / crop.width, 1600 / crop.height);
+  const width = Math.max(1, Math.round(crop.width * outputScale));
+  const height = Math.max(1, Math.round(crop.height * outputScale));
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -245,26 +242,95 @@ async function cropVisibleScreenshot(rect: DOMRect): Promise<string> {
 
   context.drawImage(
     source,
-    Math.round(rect.left * scaleX),
-    Math.round(rect.top * scaleY),
-    width,
-    height,
+    crop.x,
+    crop.y,
+    crop.width,
+    crop.height,
     0,
     0,
     width,
     height,
   );
-  return canvas.toDataURL('image/png');
+  return canvas.toDataURL('image/jpeg', 0.9);
 }
 
-function startImagePicker(): void {
+function imageFromTarget(target: Element | null): HTMLImageElement | null {
+  const image =
+    target?.closest('img') ??
+    target?.closest('figure')?.querySelector('img');
+  return image instanceof HTMLImageElement ? image : null;
+}
+
+function imageDescription(image: HTMLImageElement): string {
+  const figure = image.closest('figure');
+  return [
+    image.alt,
+    figure?.querySelector('figcaption')?.textContent,
+    figure?.previousElementSibling?.textContent,
+    figure?.nextElementSibling?.textContent,
+  ]
+    .map(cleanText)
+    .filter(Boolean)
+    .join(' ')
+    .slice(0, 1_200);
+}
+
+function afterRepaint(): Promise<void> {
+  return new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+  );
+}
+
+async function capturePageRegion(rect: DOMRect): Promise<string> {
+  const assistant = document.querySelector<HTMLElement>(
+    `[${UI_ATTRIBUTE}="assistant-root"]`,
+  );
+  const previousVisibility = assistant?.style.visibility ?? '';
+  if (assistant) assistant.style.visibility = 'hidden';
+  try {
+    await afterRepaint();
+    return await cropVisibleScreenshot(rect);
+  } finally {
+    if (assistant) assistant.style.visibility = previousVisibility;
+  }
+}
+
+async function quoteImage(
+  image: HTMLImageElement,
+  openAssistant: () => void,
+): Promise<void> {
+  const rect = image.getBoundingClientRect();
+  const originalUrl = image.currentSrc || image.src;
+  const screenshot = await capturePageRegion(rect).catch(() => '');
+  const imageUrl = screenshot || originalUrl;
+  if (!imageUrl) throw new Error('无法读取这张图片');
+
+  await sendRuntimeRequest({
+    type: 'focus:set',
+    focus: {
+      type: 'image',
+      imageUrl,
+      alt: cleanText(image.alt),
+      text: imageDescription(image),
+      section: sectionFor(image),
+      source: screenshot ? 'screenshot' : 'original',
+    },
+  });
+  openAssistant();
+}
+
+function startImagePicker(openAssistant: () => void): void {
   let hovered: HTMLElement | null = null;
   let previousOutline = '';
+  let previousOutlineOffset = '';
   const previousCursor = document.documentElement.style.cursor;
   document.documentElement.style.cursor = 'crosshair';
 
   const restoreHovered = () => {
-    if (hovered) hovered.style.outline = previousOutline;
+    if (hovered) {
+      hovered.style.outline = previousOutline;
+      hovered.style.outlineOffset = previousOutlineOffset;
+    }
     hovered = null;
   };
   const cleanup = () => {
@@ -275,14 +341,12 @@ function startImagePicker(): void {
     document.removeEventListener('keydown', onKeyDown, true);
   };
   const onMouseOver = (event: MouseEvent) => {
-    const target = event.target as Element | null;
-    const image =
-      target?.closest('img') ??
-      (target?.closest('figure')?.querySelector('img') as Element | null);
+    const image = imageFromTarget(event.target as Element | null);
     restoreHovered();
     if (image instanceof HTMLElement) {
       hovered = image;
       previousOutline = image.style.outline;
+      previousOutlineOffset = image.style.outlineOffset;
       image.style.outline = '3px solid #e75a2c';
       image.style.outlineOffset = '4px';
     }
@@ -291,48 +355,13 @@ function startImagePicker(): void {
     if (event.key === 'Escape') cleanup();
   };
   const onClick = async (event: MouseEvent) => {
-    const target = event.target as Element | null;
-    const image =
-      target?.closest('img') ??
-      (target?.closest('figure')?.querySelector('img') as Element | null);
-    if (!(image instanceof HTMLImageElement)) return;
+    const image = imageFromTarget(event.target as Element | null);
+    if (!image) return;
 
     event.preventDefault();
     event.stopImmediatePropagation();
-    const rect = image.getBoundingClientRect();
-    const section = sectionFor(image);
-    const figure = image.closest('figure');
-    const description = [
-      image.alt,
-      figure?.querySelector('figcaption')?.textContent,
-      figure?.previousElementSibling?.textContent,
-      figure?.nextElementSibling?.textContent,
-    ]
-      .map(cleanText)
-      .filter(Boolean)
-      .join(' ')
-      .slice(0, 1_200);
-    const source = image.currentSrc || image.src;
     cleanup();
-
-    let imageUrl = source;
-    let focusSource: 'original' | 'screenshot' = 'original';
-    if (!imageUrl) {
-      imageUrl = await cropVisibleScreenshot(rect);
-      focusSource = 'screenshot';
-    }
-
-    await sendRuntime({
-      type: 'focus:set',
-      focus: {
-        type: 'image',
-        imageUrl,
-        alt: cleanText(image.alt),
-        text: description,
-        section,
-        source: focusSource,
-      },
-    }).catch(() => undefined);
+    await quoteImage(image, openAssistant).catch(openAssistant);
   };
 
   document.addEventListener('mouseover', onMouseOver, true);
@@ -340,10 +369,35 @@ function startImagePicker(): void {
   document.addEventListener('keydown', onKeyDown, true);
 }
 
+function installImageDoubleClick(openAssistant: () => void): () => void {
+  let enabled = false;
+  const onActiveChange = (active: boolean) => {
+    enabled = active;
+  };
+  const onDoubleClick = (event: MouseEvent) => {
+    if (!enabled) return;
+    const target = event.target as Element | null;
+    if (target?.closest(`[${UI_ATTRIBUTE}]`)) return;
+    const image = imageFromTarget(target);
+    if (image) void quoteImage(image, openAssistant).catch(() => undefined);
+  };
+
+  const unsubscribeActive = subscribeAssistantActive(onActiveChange);
+  document.addEventListener('dblclick', onDoubleClick, true);
+  return () => {
+    unsubscribeActive();
+    document.removeEventListener('dblclick', onDoubleClick, true);
+  };
+}
+
 function showRegionPreview(
   imageUrl: string,
-  onConfirm: () => void,
+  onConfirm: () => void | Promise<void>,
 ): void {
+  const previousFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
   const backdrop = document.createElement('div');
   backdrop.setAttribute(UI_ATTRIBUTE, 'region-preview');
   backdrop.setAttribute('role', 'dialog');
@@ -403,11 +457,14 @@ function showRegionPreview(
   backdrop.append(card);
   document.documentElement.append(backdrop);
 
-  const close = () => backdrop.remove();
+  const close = () => {
+    backdrop.remove();
+    previousFocus?.focus();
+  };
   cancel.addEventListener('click', close);
   confirm.addEventListener('click', () => {
     close();
-    onConfirm();
+    void onConfirm();
   });
   backdrop.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') close();
@@ -415,7 +472,7 @@ function showRegionPreview(
   confirm.focus();
 }
 
-function startRegionPicker(): void {
+function startRegionPicker(openAssistant: () => void): void {
   const overlay = document.createElement('div');
   const box = document.createElement('div');
   overlay.setAttribute(UI_ATTRIBUTE, 'region-picker');
@@ -482,10 +539,7 @@ function startRegionPicker(): void {
     cleanup();
     if (!rect || rect.width < 12 || rect.height < 12) return;
 
-    await new Promise((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve)),
-    );
-    const imageUrl = await cropVisibleScreenshot(rect).catch(() => '');
+    const imageUrl = await capturePageRegion(rect).catch(() => '');
     if (!imageUrl) return;
     const centerElement = document.elementFromPoint(
       rect.left + rect.width / 2,
@@ -502,7 +556,9 @@ function startRegionPicker(): void {
       source: 'screenshot',
     };
     showRegionPreview(imageUrl, () => {
-      void sendRuntime({ type: 'focus:set', focus }).catch(() => undefined);
+      return sendRuntimeRequest({ type: 'focus:set', focus })
+        .then(openAssistant)
+        .catch(() => undefined);
     });
   });
   document.addEventListener('keydown', onKeyDown, true);
@@ -512,6 +568,10 @@ export default defineContentScript({
   matches: ['http://*/*', 'https://*/*'],
   runAt: 'document_idle',
   main() {
+    const runtimeGlobal = globalThis as RuntimeGlobal;
+    if (runtimeGlobal[CONTENT_RUNTIME_KEY]) return;
+    runtimeGlobal[CONTENT_RUNTIME_KEY] = true;
+
     const onMessage = (request: ContentRequest) => {
       switch (request.type) {
         case 'page:extract':
@@ -520,10 +580,10 @@ export default defineContentScript({
           window.setTimeout(() => openFloatingAssistant(true), 0);
           return Promise.resolve({ ok: true });
         case 'picker:image:start':
-          startImagePicker();
+          startImagePicker(() => openFloatingAssistant(false));
           return Promise.resolve({ ok: true });
         case 'picker:region:start':
-          startRegionPicker();
+          startRegionPicker(() => openFloatingAssistant(false));
           return Promise.resolve({ ok: true });
       }
     };
@@ -533,17 +593,23 @@ export default defineContentScript({
     const uninstallTextSelection = installTextSelection(
       () => openFloatingAssistant(false),
     );
-
-    window.addEventListener(
-      'pagehide',
-      () => {
-        uninstallTextSelection();
-        browser.runtime.onMessage.removeListener(onMessage);
-        assistant.removeEventIsolation();
-        assistant.root.unmount();
-        assistant.host.remove();
-      },
-      { once: true },
+    const uninstallImageDoubleClick = installImageDoubleClick(
+      () => openFloatingAssistant(false),
     );
+
+    const cleanup = () => {
+      uninstallTextSelection();
+      uninstallImageDoubleClick();
+      browser.runtime.onMessage.removeListener(onMessage);
+      assistant.removeEventIsolation();
+      assistant.root.unmount();
+      assistant.host.remove();
+      delete runtimeGlobal[CONTENT_RUNTIME_KEY];
+      window.removeEventListener('pagehide', onPageHide);
+    };
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (!event.persisted) cleanup();
+    };
+    window.addEventListener('pagehide', onPageHide);
   },
 });

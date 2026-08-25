@@ -92,41 +92,47 @@ export function SettingsApp({ store }: SettingsAppProps) {
             </div>
           </div>
 
-          <div className="field">
-            <label htmlFor="api-key">API Key</label>
-            <div className="input-frame">
-              <KeyRound size={18} aria-hidden="true" />
-              <input
-                id="api-key"
-                type={showKey ? 'text' : 'password'}
-                value={settings.apiKey}
-                onChange={(event) =>
-                  setSettings((current) => ({
-                    ...current,
-                    apiKey: event.target.value,
-                  }))
-                }
-                autoComplete="off"
-                spellCheck={false}
-                disabled={!loaded}
-                aria-describedby="api-key-help"
-              />
-              <button
-                className="inline-icon-button"
-                type="button"
-                aria-label={showKey ? '隐藏 API Key' : '显示 API Key'}
-                onClick={() => setShowKey((current) => !current)}
-              >
-                {showKey ? (
-                  <EyeOff size={17} aria-hidden="true" />
-                ) : (
-                  <Eye size={17} aria-hidden="true" />
-                )}
-              </button>
+          <div className="field-stack">
+            <div className="field">
+              <label htmlFor="api-key">DeepSeek API Key</label>
+              <div className="input-frame">
+                <KeyRound size={18} aria-hidden="true" />
+                <input
+                  id="api-key"
+                  type={showKey ? 'text' : 'password'}
+                  value={settings.apiKey}
+                  onChange={(event) =>
+                    setSettings((current) => ({
+                      ...current,
+                      apiKey: event.target.value,
+                    }))
+                  }
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={!loaded || saving}
+                  aria-describedby="api-key-help"
+                />
+                <button
+                  className="inline-icon-button"
+                  type="button"
+                  aria-label={
+                    showKey
+                      ? '隐藏 DeepSeek API Key'
+                      : '显示 DeepSeek API Key'
+                  }
+                  onClick={() => setShowKey((current) => !current)}
+                >
+                  {showKey ? (
+                    <EyeOff size={17} aria-hidden="true" />
+                  ) : (
+                    <Eye size={17} aria-hidden="true" />
+                  )}
+                </button>
+              </div>
+              <p id="api-key-help" className="field-help">
+                文字与图片问题统一使用 DeepSeek 视觉模型。
+              </p>
             </div>
-            <p id="api-key-help" className="field-help">
-              密钥不会写入网页、普通日志或对话记录。
-            </p>
           </div>
         </section>
 
@@ -156,7 +162,7 @@ export function SettingsApp({ store }: SettingsAppProps) {
                     retainConversations: event.target.checked,
                   }))
                 }
-                disabled={!loaded}
+                disabled={!loaded || saving}
               />
               <span aria-hidden="true" />
             </span>
@@ -166,6 +172,7 @@ export function SettingsApp({ store }: SettingsAppProps) {
             className="danger-button"
             type="button"
             onClick={() => void clearConversations()}
+            disabled={saving}
           >
             <Trash2 size={17} aria-hidden="true" />
             清除全部本地对话

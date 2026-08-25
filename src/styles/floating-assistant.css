@@ -4,6 +4,9 @@
  * pre-emit critique: P5 H4 E4 S5 R5 V4
  */
 
+@import "./message-content.css";
+@import "./question-history.css";
+
 :host {
   all: initial;
   --cr-color-ink: oklch(24% 0.015 70);
@@ -308,6 +311,54 @@ textarea:disabled {
   line-clamp: 2;
 }
 
+.cr-focus--image,
+.cr-focus--region {
+  grid-template-columns: 52px minmax(0, 1fr) 30px;
+  align-items: center;
+  background: var(--cr-color-surface-muted);
+}
+
+.cr-focus img {
+  display: block;
+  width: 52px;
+  height: 42px;
+  border: 1px solid var(--cr-color-border);
+  border-radius: var(--cr-radius-sm);
+  background: var(--cr-color-surface);
+  object-fit: cover;
+}
+
+.cr-focus > div {
+  display: grid;
+  min-width: 0;
+}
+
+.cr-focus > div strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cr-focus > button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--cr-radius-round);
+  background: transparent;
+  color: var(--cr-color-ink-muted);
+  cursor: pointer;
+}
+
+.cr-focus > button:hover {
+  background: var(--cr-color-border);
+  color: var(--cr-color-ink);
+}
+
 .cr-state {
   display: grid;
   flex: 0 0 auto;
@@ -604,9 +655,31 @@ textarea:disabled {
   background: var(--cr-color-surface-muted);
 }
 
+.cr-conversation {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.cr-conversation > .cr-messages {
+  padding-right: calc(var(--cr-space-4) + 8px);
+}
+
+.cr-conversation .question-history {
+  --question-history-bg: var(--cr-color-surface);
+  --question-history-border: var(--cr-color-border);
+  --question-history-text: var(--cr-color-ink);
+  --question-history-muted: var(--cr-color-ink-muted);
+  --question-history-hover: var(--cr-color-surface-muted);
+  --question-history-active: var(--cr-color-accent);
+}
+
 .cr-messages {
   display: grid;
+  width: 100%;
   flex: 1 1 auto;
+  align-content: start;
   min-height: 0;
   gap: var(--cr-space-3);
   overflow-y: auto;
@@ -629,7 +702,8 @@ textarea:disabled {
   font-weight: 650;
 }
 
-.cr-message > p {
+.cr-message > .message-plain,
+.cr-message > .message-markdown {
   margin: 0;
   overflow-wrap: anywhere;
   font-size: 13px;
@@ -642,13 +716,29 @@ textarea:disabled {
   justify-items: end;
 }
 
-.cr-message--user > p {
+.cr-message--user > .message-plain {
   max-width: 88%;
   border-radius: var(--cr-radius-md) var(--cr-radius-sm)
     var(--cr-radius-md) var(--cr-radius-md);
   background: var(--cr-color-ink);
   color: var(--cr-color-surface);
   padding: var(--cr-space-2) var(--cr-space-3);
+}
+
+.cr-message .message-reference {
+  --message-reference-border: var(--cr-color-border);
+  --message-reference-bg: var(--cr-color-surface-muted);
+  --message-reference-color: var(--cr-color-ink-muted);
+  --message-reference-media-bg: var(--cr-color-surface);
+}
+
+.cr-message--user .message-reference {
+  justify-self: end;
+}
+
+.cr-message--assistant > .message-markdown {
+  --message-link-color: var(--cr-color-accent-hover);
+  color: var(--cr-color-ink);
 }
 
 .cr-message--assistant {
@@ -763,10 +853,38 @@ textarea:disabled {
   color: var(--cr-color-warning);
 }
 
+.cr-composer-tools {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: var(--cr-space-2);
+  border-top: 1px solid var(--cr-color-border);
+  padding: var(--cr-space-2) var(--cr-space-3) 0;
+}
+
+.cr-composer-tools button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--cr-color-border);
+  border-radius: var(--cr-radius-round);
+  background: var(--cr-color-surface);
+  color: var(--cr-color-ink-muted);
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cr-composer-tools button:hover:not(:disabled) {
+  border-color: var(--cr-color-ink-muted);
+  color: var(--cr-color-ink);
+}
+
 .cr-composer {
   position: relative;
   flex: 0 0 auto;
-  border-top: 1px solid var(--cr-color-border);
   padding: var(--cr-space-3);
 }
 
@@ -774,12 +892,12 @@ textarea:disabled {
   display: block;
   width: 100%;
   min-height: 64px;
-  max-height: 132px;
+  max-height: min(42vh, 320px);
   resize: none;
   border: 1px solid var(--cr-color-border);
   border-radius: var(--cr-radius-md);
   background: var(--cr-color-surface);
-  padding: 10px 46px 10px 11px;
+  padding: 10px 86px 10px 11px;
   font-size: 13px;
   line-height: 1.5;
   transition:
@@ -801,19 +919,41 @@ textarea:disabled {
   opacity: 1;
 }
 
-.cr-send {
+.cr-composer__actions {
   position: absolute;
   right: 20px;
   bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cr-composer__maximize,
+.cr-send {
   display: grid;
   width: 32px;
   height: 32px;
   place-items: center;
-  border: 1px solid var(--cr-color-accent);
   border-radius: var(--cr-radius-round);
+  cursor: pointer;
+}
+
+.cr-composer__maximize {
+  border: 1px solid var(--cr-color-border);
+  background: var(--cr-color-surface);
+  color: var(--cr-color-ink-muted);
+}
+
+.cr-composer__maximize:hover {
+  border-color: var(--cr-color-ink-muted);
+  background: var(--cr-color-surface-muted);
+  color: var(--cr-color-ink);
+}
+
+.cr-send {
+  border: 1px solid var(--cr-color-accent);
   background: var(--cr-color-accent);
   color: var(--cr-color-accent-ink);
-  cursor: pointer;
   transition:
     background var(--cr-duration-fast) var(--cr-ease-out),
     transform var(--cr-duration-fast) var(--cr-ease-out);
@@ -834,6 +974,31 @@ textarea:disabled {
 
 .cr-send[data-state="loading"] {
   cursor: wait;
+}
+
+.cr-dialog--composer-maximized .cr-focus,
+.cr-dialog--composer-maximized .cr-state,
+.cr-dialog--composer-maximized .cr-conversation,
+.cr-dialog--composer-maximized .cr-empty,
+.cr-dialog--composer-maximized .cr-understanding,
+.cr-dialog--composer-maximized .cr-feedback,
+.cr-dialog--composer-maximized .cr-composer-tools,
+.cr-dialog--composer-maximized .cr-resize-handle {
+  display: none;
+}
+
+.cr-dialog--composer-maximized .cr-composer {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.cr-dialog--composer-maximized .cr-composer textarea {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+  padding-bottom: 52px;
+  overflow-y: auto;
 }
 
 .cr-spin {

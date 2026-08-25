@@ -19,17 +19,31 @@ export function createArticleChunks(
   blocks: ArticleBlock[],
   maxCharacters = 1_800,
 ): ArticleChunk[] {
+  const characterLimit = Math.max(1, Math.floor(maxCharacters));
   const chunks: ArticleChunk[] = [];
   let currentBlocks: ArticleBlock[] = [];
   let currentSection = blocks[0]?.section ?? 'Article';
   let currentLength = 0;
 
-  for (const block of blocks) {
+  const boundedBlocks = blocks.flatMap((block) => {
+    if (block.text.length <= characterLimit) return [block];
+    const pieces: ArticleBlock[] = [];
+    for (let offset = 0; offset < block.text.length; offset += characterLimit) {
+      pieces.push({
+        ...block,
+        id: `${block.id}-part-${pieces.length + 1}`,
+        text: block.text.slice(offset, offset + characterLimit),
+      });
+    }
+    return pieces;
+  });
+
+  for (const block of boundedBlocks) {
     const startsNewSection =
       currentBlocks.length > 0 && block.section !== currentSection;
     const exceedsLimit =
       currentBlocks.length > 0 &&
-      currentLength + block.text.length + 1 > maxCharacters;
+      currentLength + block.text.length + 1 > characterLimit;
 
     if (startsNewSection || exceedsLimit) {
       pushChunk(chunks, currentSection, currentBlocks);
@@ -47,7 +61,7 @@ export function createArticleChunks(
 }
 
 function tokensFor(value: string): Set<string> {
-  const normalized = value.toLocaleLowerCase();
+  const normalized = value.toLowerCase();
   const tokens = new Set(
     normalized.match(/[\p{L}\p{N}_-]{2,}/gu)?.map((token) => token.trim()) ??
       [],
@@ -95,8 +109,8 @@ export function retrieveRelevantChunks(
       const questionScore = overlapScore(questionTokens, combined);
       const focusScore = overlapScore(focusTokens, combined);
       const exactSectionBonus = query.question
-        .toLocaleLowerCase()
-        .includes(chunk.section.toLocaleLowerCase())
+        .toLowerCase()
+        .includes(chunk.section.toLowerCase())
         ? 0.15
         : 0;
 

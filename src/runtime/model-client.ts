@@ -3,7 +3,7 @@ import type { ModelRequest } from '../core/types.ts';
 export type ModelClientErrorCode =
   | 'MODEL_NOT_CONFIGURED'
   | 'API_KEY_MISSING'
-  | 'VISION_NOT_SUPPORTED'
+  | 'REQUEST_TIMEOUT'
   | 'PROVIDER_ERROR'
   | 'INVALID_RESPONSE'
   | 'NETWORK_ERROR';
@@ -22,8 +22,10 @@ export class ModelClientError extends Error {
 export interface ModelConfig {
   endpoint: string;
   model: string;
-  supportsVision?: boolean;
+  timeoutMs?: number;
 }
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
 
 type Fetcher = (
   input: string | URL | Request,
@@ -54,12 +56,73 @@ function assistantText(response: ProviderResponse): string | null {
   return text || null;
 }
 
-function requestContainsImage(request: ModelRequest): boolean {
-  return request.messages.some(
-    (message) =>
-      Array.isArray(message.content) &&
-      message.content.some((part) => part.type === 'image_url'),
-  );
+async function fetchJson<T>(
+  fetcher: Fetcher,
+  endpoint: string,
+  apiKey: string,
+  body: unknown,
+  timeoutMs: number,
+): Promise<{ payload: T; response: Response }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetcher(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (cause) {
+    if (controller.signal.aborted) {
+      throw new ModelClientError(
+        'REQUEST_TIMEOUT',
+        '模型服务响应超时，请稍后重试。',
+      );
+    }
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new ModelClientError(
+      'NETWORK_ERROR',
+      `无法连接模型服务，请检查网络后重试。（${detail}）`,
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  let payload = {} as T;
+  try {
+    payload = (await response.json()) as T;
+  } catch {
+    if (response.ok) {
+      throw new ModelClientError(
+        'INVALID_RESPONSE',
+        '模型服务返回了无法识别的响应。',
+        response.status,
+      );
+    }
+  }
+  return { payload, response };
+}
+
+function validateConfig(config: ModelConfig): void {
+  if (!config.endpoint.trim() || !config.model.trim()) {
+    throw new ModelClientError(
+      'MODEL_NOT_CONFIGURED',
+      '模型 API 尚未配置，请先在实现侧填写 endpoint 和 model。',
+    );
+  }
+}
+
+function validateApiKey(apiKey: string, label = 'API Key'): void {
+  if (!apiKey.trim()) {
+    throw new ModelClientError(
+      'API_KEY_MISSING',
+      `请先在设置中填写 ${label}。`,
+    );
+  }
 }
 
 export class OpenAiCompatibleModelClient {
@@ -69,59 +132,20 @@ export class OpenAiCompatibleModelClient {
   ) {}
 
   async complete(apiKey: string, request: ModelRequest): Promise<string> {
-    if (!this.config.endpoint.trim() || !this.config.model.trim()) {
-      throw new ModelClientError(
-        'MODEL_NOT_CONFIGURED',
-        '模型 API 尚未配置，请先在实现侧填写 endpoint 和 model。',
-      );
-    }
-    if (!apiKey.trim()) {
-      throw new ModelClientError(
-        'API_KEY_MISSING',
-        '请先在设置中填写 API Key。',
-      );
-    }
-    if (this.config.supportsVision === false && requestContainsImage(request)) {
-      throw new ModelClientError(
-        'VISION_NOT_SUPPORTED',
-        `当前模型 ${this.config.model} 不支持图片输入。请改用支持视觉理解的模型后重新构建插件。`,
-      );
-    }
+    validateConfig(this.config);
+    validateApiKey(apiKey, 'DeepSeek API Key');
 
-    let response: Response;
-    try {
-      response = await this.fetcher(this.config.endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: this.config.model,
-          messages: request.messages,
-          stream: false,
-        }),
-      });
-    } catch (cause) {
-      const detail = cause instanceof Error ? cause.message : String(cause);
-      throw new ModelClientError(
-        'NETWORK_ERROR',
-        `无法连接模型服务，请检查网络后重试。（${detail}）`,
-      );
-    }
-
-    let payload: ProviderResponse = {};
-    try {
-      payload = (await response.json()) as ProviderResponse;
-    } catch {
-      if (response.ok) {
-        throw new ModelClientError(
-          'INVALID_RESPONSE',
-          '模型服务返回了无法识别的响应。',
-          response.status,
-        );
-      }
-    }
+    const { payload, response } = await fetchJson<ProviderResponse>(
+      this.fetcher,
+      this.config.endpoint,
+      apiKey,
+      {
+        model: this.config.model,
+        messages: request.messages,
+        stream: false,
+      },
+      this.config.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    );
 
     if (!response.ok) {
       throw new ModelClientError(

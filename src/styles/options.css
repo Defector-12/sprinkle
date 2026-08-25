@@ -85,6 +85,12 @@ body {
   min-width: 0;
 }
 
+.field-stack {
+  display: grid;
+  min-width: 0;
+  gap: 24px;
+}
+
 .field > label {
   display: block;
   margin-bottom: 8px;

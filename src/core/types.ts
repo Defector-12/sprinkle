@@ -19,6 +19,7 @@ export interface ArticleBlock {
   text: string;
   section: string;
   order: number;
+  level?: number;
 }
 
 export interface ArticleImage {
@@ -28,6 +29,35 @@ export interface ArticleImage {
   caption: string;
   section: string;
   surroundingText: string;
+  order?: number;
+}
+
+export interface ArticleTableCell {
+  text: string;
+  header: boolean;
+  colSpan: number;
+  rowSpan: number;
+}
+
+export interface ArticleTableRow {
+  cells: ArticleTableCell[];
+}
+
+export interface ArticleTable {
+  id: string;
+  caption: string;
+  section: string;
+  order: number;
+  rows: ArticleTableRow[];
+}
+
+export interface ArticleFormula {
+  id: string;
+  tex: string;
+  mathml: string;
+  section: string;
+  order: number;
+  display: 'inline' | 'block';
 }
 
 export type ArticleRootKind = 'article' | 'main' | 'role-main' | 'body';
@@ -58,6 +88,8 @@ export interface ArticleDocument {
   url: string;
   blocks: ArticleBlock[];
   images: ArticleImage[];
+  tables?: ArticleTable[];
+  formulas?: ArticleFormula[];
   isPartial: boolean;
   diagnostics?: ArticleDiagnostics;
 }
@@ -81,7 +113,7 @@ export interface ImageFocus {
   alt: string;
   text: string;
   section: string;
-  source: 'original' | 'screenshot';
+  source: 'original' | 'screenshot' | 'upload';
 }
 
 export interface RegionFocus {
@@ -94,11 +126,20 @@ export interface RegionFocus {
 
 export type FocusContext = TextFocus | ImageFocus | RegionFocus;
 
+export type MessageReference =
+  | TextFocus
+  | (Omit<ImageFocus, 'imageUrl'> & { imageUrl?: string })
+  | (Omit<RegionFocus, 'imageUrl'> & { imageUrl?: string });
+
+export type AnswerModel = 'deepseek' | 'doubao'; // Doubao remains for archived conversations.
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   createdAt: number;
+  reference?: MessageReference;
+  answeredBy?: AnswerModel;
   error?: boolean;
 }
 

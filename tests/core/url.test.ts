@@ -22,6 +22,18 @@ describe('normalizePageUrl', () => {
       'https://example.com/',
     );
   });
+
+  it('preserves hash routes while removing ordinary heading anchors', () => {
+    expect(normalizePageUrl('https://example.com/app#/docs/a')).toBe(
+      'https://example.com/app#/docs/a',
+    );
+    expect(normalizePageUrl('https://example.com/app#/docs/b')).not.toBe(
+      normalizePageUrl('https://example.com/app#/docs/a'),
+    );
+    expect(normalizePageUrl('https://example.com/post#heading')).toBe(
+      'https://example.com/post',
+    );
+  });
 });
 
 describe('createPageKey', () => {

@@ -1,12 +1,19 @@
 import {
   Check,
+  Image,
   KeyRound,
   LoaderCircle,
+  Maximize2,
   MessageCircle,
+  Minimize2,
+  PanelsTopLeft,
   Power,
   RefreshCw,
+  Scan,
   Send,
   Settings,
+  Trash2,
+  Upload,
   X,
 } from 'lucide-react';
 import {
@@ -18,15 +25,26 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 
-import type { PageContext } from '../core/types.ts';
+import type { ImageFocus, PageContext } from '../core/types.ts';
+import {
+  publishAssistantActive,
+  subscribeAssistantOpen,
+  type AssistantOpenDetail,
+} from '../runtime/assistant-events.ts';
 import { ArticleDiagnosticsPanel } from './ArticleDiagnosticsPanel.tsx';
-
-export const FLOATING_ASSISTANT_OPEN_EVENT = 'context-reader:open';
-export const FLOATING_ASSISTANT_ACTIVE_EVENT = 'context-reader:active';
-
-export interface FloatingAssistantOpenDetail {
-  activate?: boolean;
-}
+import {
+  AssistantMarkdown,
+  messageAuthor,
+  MessageReferenceCard,
+} from './MessageContent.tsx';
+import {
+  imageFileFromClipboard,
+  LOCAL_IMAGE_ACCEPT,
+  readLocalImage,
+} from './local-image.ts';
+import { QuestionHistoryRail } from './QuestionHistoryRail.tsx';
+import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
+import { useStreamedAnswer } from './use-streamed-answer.ts';
 
 export interface FloatingAssistantBridge {
   initialize(): Promise<PageContext>;
@@ -34,6 +52,11 @@ export interface FloatingAssistantBridge {
   deactivate(): Promise<PageContext>;
   hasApiKey(): Promise<boolean>;
   ask(question: string): Promise<PageContext>;
+  startImagePicker(): Promise<void>;
+  startRegionPicker(): Promise<void>;
+  setImageFocus(focus: ImageFocus): Promise<PageContext>;
+  clearFocus(): Promise<PageContext>;
+  openStudy(): Promise<void>;
   openSettings(): Promise<void>;
   subscribe(listener: (context: PageContext) => void): () => void;
 }
@@ -52,8 +75,6 @@ const DIALOG_MIN_HEIGHT = 260;
 const DIALOG_MAX_WIDTH = 720;
 const DIALOG_MAX_HEIGHT = 640;
 const DRAG_THRESHOLD = 4;
-const STREAM_INTERVAL_MS = 18;
-const STREAM_STEP = 2;
 
 interface OrbPosition {
   x: number;
@@ -259,14 +280,6 @@ function dialogLayout(
   };
 }
 
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-}
-
 function statusLabel(context: PageContext | null): string {
   switch (context?.status) {
     case 'unactivated':
@@ -399,6 +412,8 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [question, setQuestion] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isComposerMaximized, setIsComposerMaximized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [orbPos, setOrbPos] = useState<OrbPosition>(() =>
     defaultOrbPosition(),
@@ -409,11 +424,20 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isMovingDialog, setIsMovingDialog] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
-  const [revealed, setRevealed] = useState<{ id: string; count: number } | null>(
-    null,
-  );
+  const {
+    target: streamingTarget,
+    revealedCount,
+    waitForAnswer,
+    acceptAnswer,
+    cancelAnswer,
+    finishStreaming,
+    visibleContent,
+    isStreaming: isMessageStreaming,
+  } = useStreamedAnswer();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const localImageInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const messagesRef = useRef<HTMLOListElement>(null);
   const messagesEndRef = useRef<HTMLLIElement>(null);
   const explicitActivationRef = useRef(false);
   const dragState = useRef<{
@@ -446,6 +470,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   } | null>(null);
   const draggedRef = useRef(false);
   const layout = dialogLayout(orbPos, dialogSize, dialogPosition);
+  useAutoGrowTextarea(inputRef, question, isComposerMaximized, 64);
 
   async function refreshApiKeyStatus() {
     try {
@@ -481,6 +506,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   }
 
   async function deactivatePage() {
+    finishStreaming();
     setError(null);
     try {
       const nextContext = await bridge.deactivate();
@@ -491,11 +517,19 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       setDialogSize(null);
       setDialogPosition(null);
       setQuestion('');
+      setIsComposerMaximized(false);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : '停止理解失败，请稍后重试。',
       );
     }
+  }
+
+  function closeDialog() {
+    finishStreaming();
+    setShowDiagnostics(false);
+    setIsComposerMaximized(false);
+    setIsOpen(false);
   }
 
   useEffect(() => {
@@ -515,43 +549,38 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
 
     const unsubscribe = bridge.subscribe((nextContext) => {
       if (!active) return;
+      acceptAnswer(nextContext);
       setContext(nextContext);
       setIsVisible(nextContext.status !== 'unactivated');
     });
-    const openFromPage = (event: Event) => {
-      const detail = (event as CustomEvent<FloatingAssistantOpenDetail>).detail;
+    const openFromPage = (detail: AssistantOpenDetail) => {
       setIsVisible(true);
       setIsOpen(true);
       if (detail?.activate !== false) void activatePage();
       else void refreshApiKeyStatus();
     };
     const closeWithEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setShowDiagnostics(false);
-        setIsOpen(false);
-      }
+      if (event.key === 'Escape') closeDialog();
     };
     const refreshAfterSettings = () => void refreshApiKeyStatus();
 
-    window.addEventListener(FLOATING_ASSISTANT_OPEN_EVENT, openFromPage);
+    const unsubscribeOpen = subscribeAssistantOpen(openFromPage);
     window.addEventListener('keydown', closeWithEscape);
     window.addEventListener('focus', refreshAfterSettings);
 
     return () => {
       active = false;
       unsubscribe();
-      window.removeEventListener(FLOATING_ASSISTANT_OPEN_EVENT, openFromPage);
+      unsubscribeOpen();
       window.removeEventListener('keydown', closeWithEscape);
       window.removeEventListener('focus', refreshAfterSettings);
     };
-  }, [bridge]);
+  }, [acceptAnswer, bridge]);
 
   useEffect(() => {
     const enabled =
       isVisible && Boolean(context && context.status !== 'unactivated');
-    window.dispatchEvent(
-      new CustomEvent(FLOATING_ASSISTANT_ACTIVE_EVENT, { detail: enabled }),
-    );
+    publishAssistantActive(enabled);
   }, [context, isVisible]);
 
   useEffect(() => {
@@ -570,49 +599,97 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   useEffect(() => {
     if (!isOpen) return;
     inputRef.current?.focus();
-  }, [isOpen]);
-
-  const lastMessage = context?.messages.at(-1) ?? null;
-  const streamingId =
-    lastMessage?.role === 'assistant' ? lastMessage.id : null;
-  const streamingContent = lastMessage?.content ?? '';
+  }, [isComposerMaximized, isOpen]);
 
   useEffect(() => {
-    if (!streamingId) return;
-    if (prefersReducedMotion()) {
-      setRevealed({ id: streamingId, count: streamingContent.length });
-      return;
-    }
-
-    setRevealed({ id: streamingId, count: 0 });
-    let count = 0;
-    const timer = window.setInterval(() => {
-      count = Math.min(streamingContent.length, count + STREAM_STEP);
-      setRevealed({ id: streamingId, count });
-      if (count >= streamingContent.length) window.clearInterval(timer);
-    }, STREAM_INTERVAL_MS);
-
-    return () => window.clearInterval(timer);
-  }, [streamingId, streamingContent]);
+    if (!isOpen || isComposerMaximized) return;
+    messagesEndRef.current?.scrollIntoView?.({
+      behavior: 'smooth',
+      block: 'end',
+    });
+  }, [context?.messages, isComposerMaximized, isOpen]);
 
   useEffect(() => {
-    if (!isOpen) return;
-    messagesEndRef.current?.scrollIntoView?.({ block: 'nearest' });
-  }, [context?.messages, revealed, isOpen]);
+    if (!isOpen || isComposerMaximized || !streamingTarget) return;
+    messagesEndRef.current?.scrollIntoView?.({
+      behavior: 'auto',
+      block: 'end',
+    });
+  }, [isComposerMaximized, isOpen, revealedCount, streamingTarget]);
 
   async function sendQuestion() {
     const value = question.trim();
-    if (!value || isSending) return;
+    if (!value || isSending || isUploadingImage) return;
 
     setIsSending(true);
+    waitForAnswer(context);
     setError(null);
     try {
-      setContext(await bridge.ask(value));
+      const nextContext = await bridge.ask(value);
+      acceptAnswer(nextContext);
+      setContext(nextContext);
       setQuestion('');
     } catch (cause) {
+      cancelAnswer();
       setError(cause instanceof Error ? cause.message : '问题发送失败');
     } finally {
       setIsSending(false);
+    }
+  }
+
+  async function startImagePicker() {
+    finishStreaming();
+    setError(null);
+    setIsOpen(false);
+    try {
+      await bridge.startImagePicker();
+    } catch (cause) {
+      setIsOpen(true);
+      setError(cause instanceof Error ? cause.message : '无法开始选择图片');
+    }
+  }
+
+  async function startRegionPicker() {
+    finishStreaming();
+    setError(null);
+    setIsOpen(false);
+    try {
+      await bridge.startRegionPicker();
+    } catch (cause) {
+      setIsOpen(true);
+      setError(cause instanceof Error ? cause.message : '无法开始框选区域');
+    }
+  }
+
+  async function uploadLocalImage(file: File) {
+    setIsUploadingImage(true);
+    setError(null);
+    try {
+      const imageUrl = await readLocalImage(file);
+      setContext(
+        await bridge.setImageFocus({
+          type: 'image',
+          imageUrl,
+          alt: file.name || '本地图片',
+          text: file.name || '本地上传图片',
+          section: '本地上传',
+          source: 'upload',
+        }),
+      );
+      inputRef.current?.focus();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '无法上传图片');
+    } finally {
+      setIsUploadingImage(false);
+    }
+  }
+
+  async function clearFocus() {
+    setError(null);
+    try {
+      setContext(await bridge.clearFocus());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '无法移除引用');
     }
   }
 
@@ -864,6 +941,8 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   const canAsk =
     hasApiKey === true &&
     (context?.status === 'ready' || context?.status === 'partial');
+  const canSelectImage =
+    context?.status === 'ready' || context?.status === 'partial';
 
   if (!isVisible) return null;
 
@@ -902,10 +981,18 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       id="context-reader-dialog"
       className={`cr-dialog${isResizing ? ' cr-dialog--resizing' : ''}${
         isMovingDialog ? ' cr-dialog--moving' : ''
-      }`}
+      }${isComposerMaximized ? ' cr-dialog--composer-maximized' : ''}`}
       role="dialog"
       aria-label="Context Reader 对话"
-      style={layout.style}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') closeDialog();
+      }}
+      style={{
+        ...layout.style,
+        ...(isComposerMaximized && !layout.style.height
+          ? { height: layout.maxHeight }
+          : {}),
+      }}
     >
       <header className="cr-header">
         <div
@@ -933,6 +1020,15 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           <button
             className="cr-icon-button"
             type="button"
+            aria-label="打开学习工作台"
+            title="打开全页学习工作台"
+            onClick={() => void bridge.openStudy()}
+          >
+            <PanelsTopLeft size={17} aria-hidden="true" />
+          </button>
+          <button
+            className="cr-icon-button"
+            type="button"
             aria-label="打开设置"
             onClick={() => void bridge.openSettings()}
           >
@@ -950,10 +1046,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             className="cr-icon-button"
             type="button"
             aria-label="收起 Context Reader"
-            onClick={() => {
-              setShowDiagnostics(false);
-              setIsOpen(false);
-            }}
+            onClick={closeDialog}
           >
             <X size={18} aria-hidden="true" />
           </button>
@@ -971,10 +1064,41 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
         />
       ) : (
         <>
-          {context?.focus?.type === 'text' && (
-            <aside className="cr-focus" aria-label="已引用的选中文字">
-              <span>已引用</span>
-              <p>{context.focus.text}</p>
+          {context?.focus && (
+            <aside
+              className={`cr-focus cr-focus--${context.focus.type}`}
+              aria-label={
+                context.focus.type === 'text'
+                  ? '已引用的选中文字'
+                  : '已引用的图片'
+              }
+            >
+              {context.focus.type === 'text' ? (
+                <>
+                  <span>已引用</span>
+                  <p>{context.focus.text}</p>
+                </>
+              ) : (
+                <>
+                  <img src={context.focus.imageUrl} alt="已引用图片预览" />
+                  <div>
+                    <strong>
+                      {context.focus.type === 'image'
+                        ? context.focus.alt ||
+                          context.focus.text ||
+                          '页面图片'
+                        : context.focus.text || '框选区域'}
+                    </strong>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="移除图片引用"
+                    onClick={() => void clearFocus()}
+                  >
+                    <Trash2 size={15} aria-hidden="true" />
+                  </button>
+                </>
+              )}
             </aside>
           )}
 
@@ -987,32 +1111,48 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           />
 
           {context?.messages.length ? (
-        <ol className="cr-messages" aria-label="当前页面对话">
-          {context.messages.map((message) => {
-            const isStreaming =
-              message.id === streamingId &&
-              revealed?.id === message.id &&
-              revealed.count < message.content.length;
-            const shownText = isStreaming
-              ? message.content.slice(0, revealed.count)
-              : message.content;
-            return (
-              <li
-                className={`cr-message cr-message--${message.role}`}
-                key={message.id}
+            <div className="cr-conversation">
+              <ol
+                ref={messagesRef}
+                className="cr-messages"
+                aria-label="当前页面对话"
               >
-                <span>{message.role === 'user' ? '你' : '助手'}</span>
-                <p aria-busy={isStreaming || undefined}>
-                  {shownText}
-                  {isStreaming && (
-                    <span className="cr-stream-caret" aria-hidden="true" />
-                  )}
-                </p>
-              </li>
-            );
-          })}
-          <li ref={messagesEndRef} className="cr-messages__end" aria-hidden="true" />
-        </ol>
+                {context.messages.map((message) => {
+                  const isStreaming = isMessageStreaming(message);
+                  const shownText = visibleContent(message);
+                  return (
+                    <li
+                      className={`cr-message cr-message--${message.role}`}
+                      key={message.id}
+                      data-question-id={
+                        message.role === 'user' ? message.id : undefined
+                      }
+                    >
+                      <span>{messageAuthor(message)}</span>
+                      <MessageReferenceCard reference={message.reference} />
+                      {message.role === 'assistant' ? (
+                        <AssistantMarkdown
+                          content={shownText}
+                          busy={isStreaming}
+                          caretClassName="cr-stream-caret"
+                        />
+                      ) : (
+                        <p className="message-plain">{shownText}</p>
+                      )}
+                    </li>
+                  );
+                })}
+                <li
+                  ref={messagesEndRef}
+                  className="cr-messages__end"
+                  aria-hidden="true"
+                />
+              </ol>
+              <QuestionHistoryRail
+                messages={context.messages}
+                scrollContainerRef={messagesRef}
+              />
+            </div>
           ) : context?.status === 'parsing' ? (
         <div className="cr-understanding" aria-hidden="true">
           <span />
@@ -1021,7 +1161,11 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
         </div>
           ) : (
         <div className="cr-empty">
-          <p>{hasApiKey === false ? '配置后即可提问' : '从当前页面开始提问'}</p>
+          <p>
+            {hasApiKey === false
+              ? '配置后即可提问'
+              : '从当前页面开始提问'}
+          </p>
           <span>
             {hasApiKey === false
               ? 'API Key 只保存在这个浏览器中。'
@@ -1041,6 +1185,60 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
         )}
           </div>
 
+          <div className="cr-composer-tools" aria-label="图片引用工具">
+            <button
+              type="button"
+              aria-label="点选页面图片"
+              disabled={!canSelectImage || isSending || isUploadingImage}
+              onClick={() => void startImagePicker()}
+            >
+              <Image size={15} aria-hidden="true" />
+              点选图片
+            </button>
+            <button
+              type="button"
+              aria-label="框选页面区域"
+              disabled={!canSelectImage || isSending || isUploadingImage}
+              onClick={() => void startRegionPicker()}
+            >
+              <Scan size={15} aria-hidden="true" />
+              框选区域
+            </button>
+            <input
+              ref={localImageInputRef}
+              type="file"
+              accept={LOCAL_IMAGE_ACCEPT}
+              aria-label="选择本地图片文件"
+              disabled={!canSelectImage || isSending || isUploadingImage}
+              hidden
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = '';
+                if (file) void uploadLocalImage(file);
+              }}
+            />
+            <button
+              type="button"
+              aria-label={
+                isUploadingImage ? '正在上传图片' : '上传本地图片'
+              }
+              title="上传本地图片"
+              disabled={!canSelectImage || isSending || isUploadingImage}
+              onClick={() => localImageInputRef.current?.click()}
+            >
+              {isUploadingImage ? (
+                <LoaderCircle
+                  className="cr-spin"
+                  size={15}
+                  aria-hidden="true"
+                />
+              ) : (
+                <Upload size={15} aria-hidden="true" />
+              )}
+              上传图片
+            </button>
+          </div>
+
           <div className="cr-composer">
         <label className="cr-sr-only" htmlFor="context-reader-question">
           向当前文章提问
@@ -1050,14 +1248,26 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           ref={inputRef}
           rows={2}
           value={question}
+          aria-expanded={isComposerMaximized}
           placeholder={
-            hasApiKey === false ? '请先填写 API Key' : canAsk ? '输入问题…' : statusLabel(context)
+            hasApiKey === false
+              ? '请先填写 DeepSeek API Key'
+              : canAsk
+                ? '输入问题…'
+                : statusLabel(context)
           }
           disabled={!canAsk || isSending}
           onChange={(event) => setQuestion(event.target.value)}
+          onPaste={(event) => {
+            const file = imageFileFromClipboard(event.clipboardData);
+            if (!file) return;
+            event.preventDefault();
+            if (!isUploadingImage) void uploadLocalImage(file);
+          }}
           onKeyDown={(event) => {
             if (
               event.key === 'Enter' &&
+              !isComposerMaximized &&
               !event.shiftKey &&
               !event.nativeEvent.isComposing
             ) {
@@ -1066,20 +1276,42 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             }
           }}
         />
-        <button
-          className="cr-send"
-          type="button"
-          aria-label="发送问题"
-          disabled={!canAsk || isSending || !question.trim()}
-          data-state={error ? 'error' : isSending ? 'loading' : 'default'}
-          onClick={() => void sendQuestion()}
-        >
-          {isBusy ? (
-            <LoaderCircle className="cr-spin" size={17} aria-hidden="true" />
-          ) : (
-            <Send size={16} aria-hidden="true" />
-          )}
-        </button>
+        <div className="cr-composer__actions">
+          <button
+            className="cr-composer__maximize"
+            type="button"
+            aria-label={
+              isComposerMaximized ? '恢复输入框' : '最大化输入框'
+            }
+            aria-pressed={isComposerMaximized}
+            title={isComposerMaximized ? '恢复输入框' : '最大化输入框'}
+            onClick={() =>
+              setIsComposerMaximized((current) => !current)
+            }
+          >
+            {isComposerMaximized ? (
+              <Minimize2 size={15} aria-hidden="true" />
+            ) : (
+              <Maximize2 size={15} aria-hidden="true" />
+            )}
+          </button>
+          <button
+            className="cr-send"
+            type="button"
+            aria-label="发送问题"
+            disabled={
+              !canAsk || isSending || isUploadingImage || !question.trim()
+            }
+            data-state={error ? 'error' : isSending ? 'loading' : 'default'}
+            onClick={() => void sendQuestion()}
+          >
+            {isBusy ? (
+              <LoaderCircle className="cr-spin" size={17} aria-hidden="true" />
+            ) : (
+              <Send size={16} aria-hidden="true" />
+            )}
+          </button>
+        </div>
           </div>
         </>
       )}
