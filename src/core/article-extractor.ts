@@ -26,6 +26,13 @@ const CONTENT_SELECTOR = [
   'ol',
 ].join(',');
 
+const LOADING_SELECTOR = [
+  '[aria-busy="true"]',
+  '[data-loading]:not([data-loading="false"])',
+  '.loading:not([hidden])',
+  '.skeleton:not([hidden])',
+].join(',');
+
 const EXCLUDED_ANCESTORS = [
   'nav',
   'footer',
@@ -36,6 +43,7 @@ const EXCLUDED_ANCESTORS = [
   '[role="toolbar"]',
   '[role="group"]',
   '[aria-hidden="true"]',
+  LOADING_SELECTOR,
 ].join(',');
 
 const CUSTOM_CONTENT_ROOT_SELECTOR = [
@@ -45,6 +53,13 @@ const CUSTOM_CONTENT_ROOT_SELECTOR = [
 ].join(',');
 
 const CUSTOM_TEXT_ELEMENT_SELECTOR = 'div, span';
+const CUSTOM_TEXT_EXCLUDED_ANCESTORS = [
+  EXCLUDED_ANCESTORS,
+  CONTENT_SELECTOR,
+  'table',
+  'math',
+  'svg',
+].join(',');
 const VISUAL_SELECTOR = [
   'img',
   'canvas',
@@ -158,7 +173,7 @@ function customTextElements(root: Element): Element[] {
       ...searchRoot.querySelectorAll(CUSTOM_TEXT_ELEMENT_SELECTOR),
     ];
     for (const candidate of candidates) {
-      if (candidate.closest(EXCLUDED_ANCESTORS)) continue;
+      if (candidate.closest(CUSTOM_TEXT_EXCLUDED_ANCESTORS)) continue;
       const text = cleanText(candidate.textContent);
       if (!text) continue;
       if (
@@ -174,37 +189,102 @@ function customTextElements(root: Element): Element[] {
   return elements;
 }
 
-function fallbackBlocks(root: Element, section: string): ArticleBlock[] {
+interface ExtractedBlockEntry {
+  element: Element;
+  block: ArticleBlock;
+}
+
+function fallbackBlockEntries(
+  root: Element,
+  section: string,
+  existingElements: Element[],
+  existingBlocks: ArticleBlock[],
+): ExtractedBlockEntry[] {
   const seen = new Set<string>();
-  const blocks: ArticleBlock[] = [];
+  for (const block of existingBlocks) seen.add(block.text);
+  const entries: ExtractedBlockEntry[] = [];
 
   for (const element of customTextElements(root)) {
-    const text = cleanText(element.textContent);
+    if (
+      existingElements.some(
+        (existing) =>
+          existing.contains(element) || element.contains(existing),
+      ) ||
+      entries.some(
+        (entry) =>
+          entry.element.contains(element) ||
+          element.contains(entry.element),
+      )
+    ) {
+      continue;
+    }
+
+    const text = readableElementText(element);
     if (text.length < 2 || seen.has(text)) continue;
     seen.add(text);
-    blocks.push({
-      id: `block-${blocks.length + 1}`,
-      type: 'paragraph',
-      text,
-      section,
-      order: blocks.length,
+    entries.push({
+      element,
+      block: {
+        id: '',
+        type: 'paragraph',
+        text,
+        section,
+        order: 0,
+      },
     });
   }
 
-  return blocks;
+  return entries;
+}
+
+function readableRootText(root: Element): string {
+  const clone = readableClone(root);
+  for (const excluded of clone.querySelectorAll(EXCLUDED_ANCESTORS)) {
+    excluded.remove();
+  }
+  return cleanText(clone.textContent);
 }
 
 function findArticleRoot(source: Document): {
   element: Element;
   kind: ArticleRootKind;
 } {
-  const article = source.querySelector('article');
-  if (article) return { element: article, kind: 'article' };
-  const main = source.querySelector('main');
-  if (main) return { element: main, kind: 'main' };
-  const roleMain = source.querySelector('[role="main"]');
-  if (roleMain) return { element: roleMain, kind: 'role-main' };
+  const candidates: Array<{
+    elements: Element[];
+    kind: ArticleRootKind;
+  }> = [
+    { elements: [...source.querySelectorAll('article')], kind: 'article' },
+    { elements: [...source.querySelectorAll('main')], kind: 'main' },
+    {
+      elements: [...source.querySelectorAll('[role="main"]')],
+      kind: 'role-main',
+    },
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate.elements.length) continue;
+    let element = candidate.elements[0] as Element;
+    let readableLength = readableRootText(element).length;
+    for (const current of candidate.elements.slice(1)) {
+      const currentLength = readableRootText(current).length;
+      if (currentLength <= readableLength) continue;
+      element = current;
+      readableLength = currentLength;
+    }
+    return { element, kind: candidate.kind };
+  }
   return { element: source.body, kind: 'body' };
+}
+
+function compareDocumentOrder(
+  left: ExtractedBlockEntry,
+  right: ExtractedBlockEntry,
+): number {
+  if (left.element === right.element) return 0;
+  return left.element.compareDocumentPosition(right.element) &
+    Node.DOCUMENT_POSITION_FOLLOWING
+    ? -1
+    : 1;
 }
 
 function findSection(root: Element, target: Element, fallback: string): string {
@@ -460,19 +540,49 @@ export function extractArticle(
   );
   let fallbackUsed = false;
   let fallbackBlockCount = 0;
+  const rootTextLength = readableRootText(root).length;
+  const shouldSupplement =
+    readableLength < MINIMUM_READABLE_LENGTH ||
+    root.querySelector(CUSTOM_CONTENT_ROOT_SELECTOR) !== null ||
+    rootTextLength - readableLength >= MINIMUM_READABLE_LENGTH;
 
-  if (readableLength < MINIMUM_READABLE_LENGTH) {
-    const recoveredBlocks = fallbackBlocks(root, title);
-    const recoveredLength = recoveredBlocks.reduce(
-      (total, block) => total + block.text.length,
-      0,
+  if (shouldSupplement) {
+    const recoveredEntries = fallbackBlockEntries(
+      root,
+      title,
+      blockElements,
+      blocks,
     );
-    if (recoveredLength > readableLength) {
-      blocks.splice(0, blocks.length, ...recoveredBlocks);
-      blockElements.splice(0, blockElements.length);
-      readableLength = recoveredLength;
+    if (recoveredEntries.length) {
+      const entries = [
+        ...blocks.map((block, index) => ({
+          block,
+          element: blockElements[index] as Element,
+        })),
+        ...recoveredEntries,
+      ].sort(compareDocumentOrder);
+      let section = title;
+      const orderedBlocks = entries.map(({ block }, index) => {
+        if (block.type === 'heading') section = block.text;
+        return {
+          ...block,
+          id: `block-${index + 1}`,
+          section,
+          order: index,
+        };
+      });
+      blocks.splice(0, blocks.length, ...orderedBlocks);
+      blockElements.splice(
+        0,
+        blockElements.length,
+        ...entries.map((entry) => entry.element),
+      );
+      readableLength = orderedBlocks.reduce(
+        (total, block) => total + block.text.length,
+        0,
+      );
       fallbackUsed = true;
-      fallbackBlockCount = recoveredBlocks.length;
+      fallbackBlockCount = recoveredEntries.length;
     }
   }
 
@@ -499,12 +609,35 @@ export function extractArticle(
   }
   const tables = extractTables(root, title, blockElements, blocks);
   const formulas = extractFormulas(root, title, blockElements, blocks);
+  const structuredReadableLength =
+    tables.reduce(
+      (total, table) =>
+        total +
+        table.caption.length +
+        table.rows.reduce(
+          (rowTotal, row) =>
+            rowTotal +
+            row.cells.reduce(
+              (cellTotal, cell) => cellTotal + cell.text.length,
+              0,
+            ),
+          0,
+        ),
+      0,
+    ) +
+    formulas.reduce(
+      (total, formula) => total + formula.tex.length,
+      0,
+    );
+  const totalReadableLength = readableLength + structuredReadableLength;
+  const loadingIndicatorCount =
+    root.querySelectorAll(LOADING_SELECTOR).length;
 
   const diagnostics: ArticleDiagnostics = {
     rootKind: rootSelection.kind,
-    readableLength,
+    readableLength: totalReadableLength,
     minimumReadableLength: MINIMUM_READABLE_LENGTH,
-    rootTextLength: cleanText(root.textContent).length,
+    rootTextLength,
     candidateBlockCount: candidateBlocks.length,
     acceptedBlockCount: blocks.length,
     excludedBlockCount,
@@ -518,9 +651,7 @@ export function extractArticle(
     shadowRootCount: [...root.querySelectorAll('*')].filter(
       (element) => element.shadowRoot,
     ).length,
-    loadingIndicatorCount: root.querySelectorAll(
-      '[aria-busy="true"], [data-loading], .loading, .skeleton',
-    ).length,
+    loadingIndicatorCount,
     fallbackUsed,
     fallbackBlockCount,
   };
@@ -532,7 +663,9 @@ export function extractArticle(
     images,
     tables,
     formulas,
-    isPartial: readableLength < MINIMUM_READABLE_LENGTH,
+    isPartial:
+      totalReadableLength < MINIMUM_READABLE_LENGTH ||
+      loadingIndicatorCount > 0,
     diagnostics,
   };
 }

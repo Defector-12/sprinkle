@@ -79,7 +79,7 @@ export function buildDiagnosticIssues(
       evidence: `当前只提取到 ${diagnostics.readableLength} 个字符，完整读取阈值是 ${diagnostics.minimumReadableLength} 个字符。这是页面被标记为“部分内容”的直接原因。`,
       suggestions: [
         '确认页面正文已经加载完成，再点击工具栏图标重新理解。',
-        '检查正文是否主要由自定义 div、表格、Canvas 或嵌入页面承载。',
+        '检查正文是否主要由 iframe、Shadow DOM 或虚拟列表承载。',
       ],
     });
   }
@@ -104,10 +104,10 @@ export function buildDiagnosticIssues(
       title: '页面包含多个文章容器',
       summary: `检测到 ${diagnostics.articleCandidateCount} 个 <article>`,
       evidence:
-        '当前提取器按优先级选择第一个 <article>。它可能是摘要、推荐卡片或评论，而不是真正正文。',
+        '提取器已比较各候选容器的可读文本量并选择内容最丰富的一项，但特殊页面仍可能把评论或聚合内容标记为 article。',
       suggestions: [
-        '检查页面最前面的 <article> 是否确实是正文。',
-        '后续可改为比较候选容器的正文长度和标题结构后再选择。',
+        '在左侧工作台确认当前选中的标题和正文是否正确。',
+        '如果这是固定站点，可以为该站点增加专用正文选择器。',
       ],
     });
   }
@@ -115,15 +115,14 @@ export function buildDiagnosticIssues(
   const unsupportedCount =
     diagnostics.iframeCount +
     diagnostics.canvasCount +
-    diagnostics.tableCount +
     diagnostics.shadowRootCount;
   if (unsupportedCount > 0) {
     issues.push({
       id: 'unsupported-structure',
-      title: '存在暂未读取的内容结构',
-      summary: `iframe ${diagnostics.iframeCount} · Canvas ${diagnostics.canvasCount} · 表格 ${diagnostics.tableCount} · Shadow DOM ${diagnostics.shadowRootCount}`,
+      title: '存在无法完整转成文字的结构',
+      summary: `iframe ${diagnostics.iframeCount} · Canvas ${diagnostics.canvasCount} · Shadow DOM ${diagnostics.shadowRootCount}`,
       evidence:
-        '当前正文白名单主要读取标题、段落、列表、引用和代码块。嵌入页面、Canvas、复杂表格和 Shadow DOM 不会被完整展开。',
+        '表格已按单元格读取；Canvas 会保存为图片但不会自动理解全部像素，iframe 和 Shadow DOM 内容不会被完整展开。',
       suggestions: [
         '确认关键正文是否位于这些结构中。',
         '对固定站点增加结构适配，或在未来版本中加入专用提取器。',
@@ -262,8 +261,8 @@ export function ArticleDiagnosticsPanel({
         </div>
         {diagnostics.fallbackUsed && (
           <div>
-            <dt>回退提取</dt>
-            <dd>已恢复 {diagnostics.fallbackBlockCount} 个文本块</dd>
+            <dt>补充提取</dt>
+            <dd>已补采 {diagnostics.fallbackBlockCount} 个文本块</dd>
           </div>
         )}
       </dl>

@@ -245,9 +245,6 @@ describe('extractArticle', () => {
         <p aria-hidden="true">Hidden article body</p>
         <div class="skeleton">Loading more content</div>
       </article>
-      <article>
-        <p>${'Long article body '.repeat(20)}</p>
-      </article>
     `;
 
     const article = extractArticle(document, 'https://example.com/dynamic');
@@ -255,11 +252,89 @@ describe('extractArticle', () => {
     expect(article.diagnostics).toEqual(
       expect.objectContaining({
         rootKind: 'article',
-        articleCandidateCount: 2,
+        articleCandidateCount: 1,
         excludedBlockCount: 1,
         tableCount: 1,
         iframeCount: 1,
         loadingIndicatorCount: 1,
+      }),
+    );
+  });
+
+  it('keeps a content-rich page partial while it still reports loading', () => {
+    document.body.innerHTML = `
+      <article>
+        <h1>Streaming article</h1>
+        <p>${'Already rendered article content. '.repeat(8)}</p>
+        <div class="skeleton">Loading the remaining sections</div>
+      </article>
+    `;
+
+    const article = extractArticle(
+      document,
+      'https://example.com/streaming-article',
+    );
+
+    expect(article.isPartial).toBe(true);
+    expect(article.blocks.map((block) => block.text).join(' ')).not.toContain(
+      'Loading the remaining sections',
+    );
+    expect(article.diagnostics?.loadingIndicatorCount).toBe(1);
+  });
+
+  it('selects the most content-rich article instead of the first article card', () => {
+    document.body.innerHTML = `
+      <main>
+        <article>
+          <h2>Recommended article</h2>
+          <p>Short recommendation.</p>
+        </article>
+        <article>
+          <h1>Complete technical article</h1>
+          <p>${'Detailed architecture and implementation discussion. '.repeat(12)}</p>
+          <h2>Conclusion</h2>
+          <p>${'Final trade-offs and operational guidance. '.repeat(8)}</p>
+        </article>
+      </main>
+    `;
+
+    const article = extractArticle(
+      document,
+      'https://example.com/technical-article',
+    );
+    const text = article.blocks.map((block) => block.text).join(' ');
+
+    expect(article.title).toBe('Complete technical article');
+    expect(text).toContain('Final trade-offs and operational guidance.');
+    expect(text).not.toContain('Short recommendation.');
+    expect(article.diagnostics?.articleCandidateCount).toBe(2);
+  });
+
+  it('supplements semantic paragraphs with later custom-rendered text', () => {
+    document.body.innerHTML = `
+      <article>
+        <h1>Mixed rendering article</h1>
+        <p>${'Semantic introduction that is already long enough. '.repeat(4)}</p>
+        <section>
+          <div><span>${'Custom middle section with implementation details. '.repeat(5)}</span></div>
+          <div><span>${'Custom final section with conclusions and next steps. '.repeat(5)}</span></div>
+        </section>
+      </article>
+    `;
+
+    const article = extractArticle(
+      document,
+      'https://example.com/mixed-rendering',
+    );
+    const text = article.blocks.map((block) => block.text).join(' ');
+
+    expect(text).toContain('Semantic introduction');
+    expect(text).toContain('Custom middle section');
+    expect(text).toContain('Custom final section');
+    expect(article.diagnostics).toEqual(
+      expect.objectContaining({
+        fallbackUsed: true,
+        fallbackBlockCount: 2,
       }),
     );
   });

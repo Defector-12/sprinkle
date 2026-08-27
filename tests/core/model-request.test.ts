@@ -186,4 +186,44 @@ describe('buildModelRequest', () => {
       ]),
     );
   });
+
+  it('labels whole-article context and discloses budget truncation', () => {
+    const request = buildModelRequest({
+      article,
+      question: '总结全文',
+      relevantChunks: [
+        {
+          id: 'chunk-1',
+          section: 'Memory types',
+          text: 'Short-term memory keeps the current task state.',
+          blockIds: ['memory'],
+        },
+      ],
+      history: [],
+      focus: null,
+      contextMode: 'whole',
+      contextTruncated: true,
+    });
+    const serialized = JSON.stringify(request.messages);
+
+    expect(serialized).toContain('当前已解析到的文章全文');
+    expect(serialized).toContain('按全文位置均匀选取');
+    expect(serialized).not.toContain('当前页面内容已完成解析');
+  });
+
+  it('confirms when the parsed whole article fits in the request', () => {
+    const request = buildModelRequest({
+      article,
+      question: '总结全文',
+      relevantChunks: [],
+      history: [],
+      focus: null,
+      contextMode: 'whole',
+      contextTruncated: false,
+    });
+    const serialized = JSON.stringify(request.messages);
+
+    expect(serialized).toContain('本次请求包含当前已解析到的文章全文');
+    expect(serialized).not.toContain('按全文位置均匀选取');
+  });
 });

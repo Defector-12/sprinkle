@@ -8,8 +8,9 @@ import {
 import { buildModelRequest } from '../src/core/model-request.ts';
 import { createPageContext } from '../src/core/page-context.ts';
 import {
+  articleContentBlocks,
   createArticleChunks,
-  retrieveRelevantChunks,
+  selectArticleContext,
 } from '../src/core/retrieval.ts';
 import { createPageKey, normalizePageUrl } from '../src/core/url.ts';
 import type {
@@ -261,8 +262,8 @@ async function performAskPage(
 
   const settings = await loadSettings();
 
-  const chunks = createArticleChunks(current.article.blocks);
-  const relevantChunks = retrieveRelevantChunks(chunks, {
+  const chunks = createArticleChunks(articleContentBlocks(current.article));
+  const selectedContext = selectArticleContext(chunks, {
     question,
     focusText: current.focus?.text,
     limit: 6,
@@ -270,9 +271,11 @@ async function performAskPage(
   const request = buildModelRequest({
     article: current.article,
     question,
-    relevantChunks,
+    relevantChunks: selectedContext.chunks,
     history: current.messages,
     focus: current.focus,
+    contextMode: selectedContext.mode,
+    contextTruncated: selectedContext.isTruncated,
   });
   if (!settings.apiKey.trim()) {
     throw new Error('请先在设置中填写 DeepSeek API Key。');

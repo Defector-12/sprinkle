@@ -191,9 +191,11 @@ describe('StudyWorkspace', () => {
       screen.getByRole('table', { name: 'Memory comparison' }),
     ).toBeVisible();
     expect(screen.getByText('1M tokens')).toBeVisible();
-    expect(
-      screen.getByTestId('study-formula-formula-1').innerHTML,
-    ).toContain('<math');
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('study-formula-formula-1').innerHTML,
+      ).toContain('<math'),
+    );
     expect(
       screen.getByRole('img', { name: 'Agent memory architecture' }),
     ).toBeVisible();
