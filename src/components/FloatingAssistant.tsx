@@ -624,11 +624,11 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     setIsSending(true);
     waitForAnswer(context);
     setError(null);
+    setQuestion('');
     try {
       const nextContext = await bridge.ask(value);
       acceptAnswer(nextContext);
       setContext(nextContext);
-      setQuestion('');
     } catch (cause) {
       cancelAnswer();
       setError(cause instanceof Error ? cause.message : '问题发送失败');

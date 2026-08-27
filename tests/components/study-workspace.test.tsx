@@ -349,6 +349,38 @@ describe('StudyWorkspace', () => {
     ).toBeVisible();
   });
 
+  it('clears and collapses the composer as soon as a question is sent', async () => {
+    let resolveAsk: (context: PageContext) => void = () => undefined;
+    const bridge = createBridge({
+      ask: vi.fn(
+        () =>
+          new Promise<PageContext>((resolve) => {
+            resolveAsk = resolve;
+          }),
+      ),
+    });
+    render(<StudyWorkspace bridge={bridge} />);
+    const input = (await screen.findByRole('textbox', {
+      name: '向当前资料提问',
+    })) as HTMLTextAreaElement;
+    Object.defineProperty(input, 'scrollHeight', {
+      configurable: true,
+      get: () => (input.value ? 240 : 92),
+    });
+
+    await userEvent.type(input, '发送后立即清空研究问题');
+    await userEvent.click(screen.getByRole('button', { name: '发送问题' }));
+
+    expect(bridge.ask).toHaveBeenCalledWith('发送后立即清空研究问题');
+    expect(input).toHaveValue('');
+    expect(input).toHaveStyle({ height: '92px' });
+
+    await act(async () => {
+      resolveAsk(readyContext);
+      await Promise.resolve();
+    });
+  });
+
   it('finishes an in-progress answer when the workspace becomes hidden', async () => {
     const answer = 'This answer should be complete when the user returns.';
     const bridge = createBridge({
