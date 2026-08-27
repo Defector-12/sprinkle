@@ -575,11 +575,11 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     setBusy(true);
     waitForAnswer(context);
     setError(null);
+    setQuestion('');
     try {
       const nextContext = await bridge.ask(value);
       setContext(nextContext);
       acceptAnswer(nextContext);
-      setQuestion('');
     } catch (cause) {
       cancelAnswer();
       setError(cause instanceof Error ? cause.message : '问题发送失败');

@@ -422,6 +422,42 @@ describe('FloatingAssistant', () => {
     expect(screen.getByText('DeepSeek')).toBeVisible();
   });
 
+  it('clears and collapses the composer as soon as a question is sent', async () => {
+    let resolveAsk: (context: PageContext) => void = () => undefined;
+    const bridge = createBridge(readyContext, {
+      ask: vi.fn(
+        () =>
+          new Promise<PageContext>((resolve) => {
+            resolveAsk = resolve;
+          }),
+      ),
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    const input = screen.getByRole('textbox', {
+      name: '向当前文章提问',
+    }) as HTMLTextAreaElement;
+    Object.defineProperty(input, 'scrollHeight', {
+      configurable: true,
+      get: () => (input.value ? 180 : 64),
+    });
+
+    await userEvent.type(input, '发送后立即清空这段内容');
+    await userEvent.click(screen.getByRole('button', { name: '发送问题' }));
+
+    expect(bridge.ask).toHaveBeenCalledWith('发送后立即清空这段内容');
+    expect(input).toHaveValue('');
+    expect(input).toHaveStyle({ height: '64px' });
+
+    await act(async () => {
+      resolveAsk(readyContext);
+      await Promise.resolve();
+    });
+  });
+
   it('scrolls to the newest conversation content after sending', async () => {
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
