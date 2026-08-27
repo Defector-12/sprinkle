@@ -89,7 +89,7 @@ describe('buildModelRequest', () => {
     ]);
   });
 
-  it('excludes unanswered history and trims complete conversation turns', () => {
+  it('excludes unanswered history and keeps complete history within budget', () => {
     const history: ChatMessage[] = Array.from({ length: 5 }, (_, index) => [
       {
         id: `user-${index}`,
@@ -120,10 +120,45 @@ describe('buildModelRequest', () => {
     });
     const historyMessages = request.messages.slice(1, -1);
 
-    expect(historyMessages).toHaveLength(8);
-    expect(historyMessages[0]?.content).toBe('Question 1');
+    expect(historyMessages).toHaveLength(10);
+    expect(historyMessages[0]?.content).toBe('Question 0');
     expect(historyMessages.at(-1)?.content).toBe('Answer 4');
     expect(JSON.stringify(request)).not.toContain('Unanswered question');
+  });
+
+  it('recalls an older completed turn when it is relevant to the current question', () => {
+    const history: ChatMessage[] = Array.from({ length: 7 }, (_, index) => [
+      {
+        id: `user-${index}`,
+        role: 'user' as const,
+        content:
+          index === 0
+            ? 'How does the checkpoint coordinator recover state?'
+            : `Question ${index} about an unrelated topic`,
+        createdAt: index * 2,
+      },
+      {
+        id: `assistant-${index}`,
+        role: 'assistant' as const,
+        content:
+          index === 0
+            ? 'It restores the latest durable checkpoint before replaying events.'
+            : `Answer ${index}`,
+        createdAt: index * 2 + 1,
+      },
+    ]).flat();
+
+    const request = buildModelRequest({
+      article,
+      question: 'Why does checkpoint recovery replay events?',
+      relevantChunks: [],
+      history,
+      focus: null,
+    });
+
+    expect(JSON.stringify(request.messages)).toContain(
+      'It restores the latest durable checkpoint before replaying events.',
+    );
   });
 
   it('adds a selected image to a multimodal user message', () => {

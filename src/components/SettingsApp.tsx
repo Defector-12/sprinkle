@@ -66,7 +66,7 @@ export function SettingsApp({ store }: SettingsAppProps) {
     setError('');
     try {
       await store.clearConversations();
-      setStatus('本地对话记录已清除');
+      setStatus('学习记录已清除');
     } catch {
       setError('清除失败，请重试');
     }
@@ -140,21 +140,21 @@ export function SettingsApp({ store }: SettingsAppProps) {
           <div className="section-heading">
             <span className="section-number">02</span>
             <div>
-              <h2 id="privacy-heading">会话与隐私</h2>
-              <p>默认关闭长期记录，标签页关闭后清理临时上下文。</p>
+              <h2 id="privacy-heading">学习记录与隐私</h2>
+              <p>默认关闭保存，标签页关闭后清理临时正文。</p>
             </div>
           </div>
 
           <label className="toggle-row" htmlFor="retain-conversations">
             <span>
-              <strong>保留对话记录</strong>
+              <strong>保存学习记录</strong>
               <small>只保存问答文本，不保存文章全文、图片或截图。</small>
             </span>
             <span className="switch">
               <input
                 id="retain-conversations"
                 type="checkbox"
-                aria-label="保留对话记录"
+                aria-label="保存学习记录"
                 checked={settings.retainConversations}
                 onChange={(event) =>
                   setSettings((current) => ({
@@ -175,7 +175,7 @@ export function SettingsApp({ store }: SettingsAppProps) {
             disabled={saving}
           >
             <Trash2 size={17} aria-hidden="true" />
-            清除全部本地对话
+            清除全部学习记录
           </button>
         </section>
 

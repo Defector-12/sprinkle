@@ -2,6 +2,7 @@ import {
   ArrowUp,
   ExternalLink,
   Image as ImageIcon,
+  LibraryBig,
   LoaderCircle,
   Maximize2,
   Minimize2,
@@ -54,6 +55,7 @@ export interface StudyWorkspaceBridgeContract {
   captureRegion(rect: StudyCaptureRect): Promise<string>;
   clearFocus(): Promise<PageContext>;
   openSource(): Promise<void>;
+  openHistory(): Promise<void>;
   subscribe(listener: (context: PageContext) => void): () => void;
 }
 
@@ -694,6 +696,10 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
             <button type="button" onClick={() => void bridge.openSource()}>
               <ExternalLink size={16} aria-hidden="true" />
               <span>打开原网页</span>
+            </button>
+            <button type="button" onClick={() => void bridge.openHistory()}>
+              <LibraryBig size={16} aria-hidden="true" />
+              <span>学习记录</span>
             </button>
           </div>
         </header>

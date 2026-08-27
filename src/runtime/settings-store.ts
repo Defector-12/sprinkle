@@ -2,12 +2,10 @@ import { browser } from 'wxt/browser';
 
 import type { SettingsStore } from '../components/SettingsApp.tsx';
 import type { UserSettings } from '../core/types.ts';
-import {
-  ConversationArchive,
-  type StorageArea,
-} from './context-repository.ts';
+import type { StorageArea } from './context-repository.ts';
+import { sendRuntimeRequest } from './runtime-client.ts';
 
-const SETTINGS_KEY = 'context-reader:settings';
+export const SETTINGS_KEY = 'context-reader:settings';
 
 export const DEFAULT_SETTINGS: UserSettings = {
   apiKey: '',
@@ -19,6 +17,8 @@ export function localStorageArea(): StorageArea {
     get: async (keys) => browser.storage.local.get(keys),
     set: async (items) => browser.storage.local.set(items),
     remove: async (keys) => browser.storage.local.remove(keys),
+    getBytesInUse: async (keys) =>
+      browser.storage.local.getBytesInUse(keys ?? null),
   };
 }
 
@@ -54,6 +54,6 @@ export class BrowserSettingsStore implements SettingsStore {
   }
 
   async clearConversations(): Promise<void> {
-    await new ConversationArchive(localStorageArea()).clear();
+    await sendRuntimeRequest<void>({ type: 'history:clear' });
   }
 }

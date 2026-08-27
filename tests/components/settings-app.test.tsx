@@ -28,7 +28,7 @@ describe('SettingsApp', () => {
       'password',
     );
     expect(screen.queryByLabelText('Doubao API Key')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('保留对话记录')).toBeVisible();
+    expect(screen.getByLabelText('保存学习记录')).toBeVisible();
     expect(screen.queryByLabelText('模型')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('API 地址')).not.toBeInTheDocument();
   });
@@ -41,7 +41,7 @@ describe('SettingsApp', () => {
       await screen.findByLabelText('DeepSeek API Key'),
       'deepseek-key',
     );
-    await userEvent.click(screen.getByLabelText('保留对话记录'));
+    await userEvent.click(screen.getByLabelText('保存学习记录'));
     await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
     expect(store.save).toHaveBeenCalledWith({
@@ -62,14 +62,14 @@ describe('SettingsApp', () => {
     );
     render(<SettingsApp store={store} />);
     const apiKey = await screen.findByLabelText('DeepSeek API Key');
-    const retention = screen.getByLabelText('保留对话记录');
+    const retention = screen.getByLabelText('保存学习记录');
 
     await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
     expect(apiKey).toBeDisabled();
     expect(retention).toBeDisabled();
     expect(
-      screen.getByRole('button', { name: '清除全部本地对话' }),
+      screen.getByRole('button', { name: '清除全部学习记录' }),
     ).toBeDisabled();
 
     finishSave?.();

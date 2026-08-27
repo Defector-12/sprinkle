@@ -155,6 +155,7 @@ function createBridge(
       .mockResolvedValue('data:image/jpeg;base64,selected-region'),
     clearFocus: vi.fn().mockResolvedValue(readyContext),
     openSource: vi.fn().mockResolvedValue(undefined),
+    openHistory: vi.fn().mockResolvedValue(undefined),
     subscribe: vi.fn().mockReturnValue(() => undefined),
     ...overrides,
   };
@@ -167,7 +168,8 @@ describe('StudyWorkspace', () => {
   });
 
   it('renders a scrollable article beside the existing model conversation', async () => {
-    render(<StudyWorkspace bridge={createBridge()} />);
+    const bridge = createBridge();
+    render(<StudyWorkspace bridge={bridge} />);
 
     expect(
       await screen.findByRole('heading', {
@@ -207,6 +209,10 @@ describe('StudyWorkspace', () => {
     expect(
       screen.getByRole('textbox', { name: '向当前资料提问' }),
     ).toBeVisible();
+    await userEvent.click(
+      screen.getByRole('button', { name: '学习记录' }),
+    );
+    expect(bridge.openHistory).toHaveBeenCalledOnce();
   });
 
   it('labels an image reference without exposing model routing', async () => {

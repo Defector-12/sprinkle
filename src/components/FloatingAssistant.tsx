@@ -2,6 +2,7 @@ import {
   Check,
   Image,
   KeyRound,
+  LibraryBig,
   LoaderCircle,
   Maximize2,
   MessageCircle,
@@ -57,6 +58,7 @@ export interface FloatingAssistantBridge {
   setImageFocus(focus: ImageFocus): Promise<PageContext>;
   clearFocus(): Promise<PageContext>;
   openStudy(): Promise<void>;
+  openHistory(): Promise<void>;
   openSettings(): Promise<void>;
   subscribe(listener: (context: PageContext) => void): () => void;
 }
@@ -1017,6 +1019,15 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           </div>
         </div>
         <div className="cr-header__actions">
+          <button
+            className="cr-icon-button"
+            type="button"
+            aria-label="打开学习记录"
+            title="打开学习记录"
+            onClick={() => void bridge.openHistory()}
+          >
+            <LibraryBig size={17} aria-hidden="true" />
+          </button>
           <button
             className="cr-icon-button"
             type="button"

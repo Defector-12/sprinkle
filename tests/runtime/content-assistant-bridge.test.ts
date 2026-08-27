@@ -38,12 +38,17 @@ describe('ContentAssistantBridge', () => {
     expect(openOptionsPage).not.toHaveBeenCalled();
   });
 
-  it('opens the study workspace through the source-page background context', async () => {
+  it('opens the workspace and learning records through background', async () => {
     sendMessage.mockResolvedValue({ ok: true, data: undefined });
+    const bridge = new ContentAssistantBridge();
 
-    await new ContentAssistantBridge().openStudy();
+    await bridge.openStudy();
+    await bridge.openHistory();
 
-    expect(sendMessage).toHaveBeenCalledWith({ type: 'study:open' });
+    expect(sendMessage).toHaveBeenNthCalledWith(1, { type: 'study:open' });
+    expect(sendMessage).toHaveBeenNthCalledWith(2, {
+      type: 'history:open',
+    });
   });
 
   it('loads dormant context without starting page extraction', async () => {

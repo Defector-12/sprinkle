@@ -94,6 +94,7 @@ function createBridge(
       })),
     clearFocus: vi.fn().mockResolvedValue({ ...context, focus: null }),
     openStudy: vi.fn().mockResolvedValue(undefined),
+    openHistory: vi.fn().mockResolvedValue(undefined),
     openSettings: vi.fn().mockResolvedValue(undefined),
     subscribe: vi.fn().mockReturnValue(() => undefined),
     ...overrides,
@@ -221,6 +222,11 @@ describe('FloatingAssistant', () => {
     );
 
     expect(bridge.openStudy).toHaveBeenCalledOnce();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '打开学习记录' }),
+    );
+    expect(bridge.openHistory).toHaveBeenCalledOnce();
   });
 
   it('opens from a selection event and shows the selected text as context', async () => {

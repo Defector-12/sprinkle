@@ -78,4 +78,16 @@ describe('StudyWorkspaceBridge', () => {
         'chrome-extension://id/study.html?tabId=7&url=https%3A%2F%2Fexample.com%2Fpaper%3Flang%3Dzh',
     });
   });
+
+  it('opens learning records through background', async () => {
+    sendMessage.mockResolvedValue({ ok: true, data: undefined });
+    const bridge = new StudyWorkspaceBridge({
+      tabId: 7,
+      url: 'https://example.com/paper',
+    });
+
+    await bridge.openHistory();
+
+    expect(sendMessage).toHaveBeenCalledWith({ type: 'history:open' });
+  });
 });

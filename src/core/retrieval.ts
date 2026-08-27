@@ -60,7 +60,7 @@ export function createArticleChunks(
   return chunks;
 }
 
-function tokensFor(value: string): Set<string> {
+export function tokensFor(value: string): Set<string> {
   const normalized = value.toLowerCase();
   const tokens = new Set(
     normalized.match(/[\p{L}\p{N}_-]{2,}/gu)?.map((token) => token.trim()) ??
@@ -77,7 +77,10 @@ function tokensFor(value: string): Set<string> {
   return tokens;
 }
 
-function overlapScore(queryTokens: Set<string>, candidate: string): number {
+export function overlapScore(
+  queryTokens: Set<string>,
+  candidate: string,
+): number {
   if (!queryTokens.size) return 0;
   const candidateTokens = tokensFor(candidate);
   let matches = 0;

@@ -22,6 +22,7 @@ import type {
 } from '../src/core/types.ts';
 import {
   ConversationArchive,
+  mergeConversationMessages,
   SessionContextRepository,
 } from '../src/runtime/context-repository.ts';
 import { extensionUrl } from '../src/runtime/extension-url.ts';
@@ -34,6 +35,7 @@ import { OpenAiCompatibleModelClient } from '../src/runtime/model-client.ts';
 import {
   loadSettings,
   localStorageArea,
+  SETTINGS_KEY,
   sessionStorageArea,
 } from '../src/runtime/settings-store.ts';
 import { captureVisibleTabForSender } from '../src/runtime/screenshot.ts';
@@ -161,6 +163,12 @@ async function notify(context: PageContext): Promise<void> {
   await Promise.all(tasks);
 }
 
+async function notifyHistoryChanged(): Promise<void> {
+  await browser.runtime
+    .sendMessage({ type: 'history:changed' })
+    .catch(() => undefined);
+}
+
 async function getOrCreateContext(tab: {
   id: number;
   url: string;
@@ -170,11 +178,8 @@ async function getOrCreateContext(tab: {
   if (stored) return stored;
 
   let context = createPageContext(tab.id, tab.url, tab.title);
-  const settings = await loadSettings();
-  if (settings.retainConversations) {
-    const messages = await conversations.load(tab.url);
-    if (messages.length) context = { ...context, messages };
-  }
+  const messages = await conversations.load(tab.url);
+  if (messages.length) context = { ...context, messages };
   await contexts.save(context);
   return context;
 }
@@ -313,6 +318,7 @@ async function performAskPage(
     if (settings.retainConversations) {
       try {
         await conversations.save(completed);
+        await notifyHistoryChanged();
       } catch {
         finalized = {
           ...completed,
@@ -368,7 +374,6 @@ async function askPage(
 async function clearPage(tab: PageTab): Promise<PageContext> {
   invalidatePageOperations(createPageKey(tab.id, tab.url));
   await contexts.deletePage(tab.id, tab.url);
-  await conversations.delete(tab.url);
   const cleared = await getOrCreateContext(tab);
   await notify(cleared);
   return cleared;
@@ -458,6 +463,146 @@ async function openStudy(tab: PageTab): Promise<void> {
   });
 }
 
+async function openHistory(): Promise<void> {
+  await browser.tabs.create({
+    url: extensionUrl('/library.html'),
+  });
+}
+
+async function clearArchivedConversation(url: string): Promise<void> {
+  const matching = await contexts.listForUrl(url);
+  for (const context of matching) {
+    invalidatePageOperations(createPageKey(context.tabId, context.url));
+  }
+  await conversations.delete(url);
+  const updated = await contexts.replaceMessagesForUrl(url, []);
+  await Promise.all(updated.map(notify));
+  await notifyHistoryChanged();
+}
+
+async function clearArchivedConversations(): Promise<void> {
+  const activeContexts = await contexts.listAll();
+  for (const context of activeContexts) {
+    invalidatePageOperations(createPageKey(context.tabId, context.url));
+  }
+  await conversations.clear();
+  const updated = await contexts.clearAllMessages();
+  await Promise.all(updated.map(notify));
+  await notifyHistoryChanged();
+}
+
+async function hydrateArchivedMessages(
+  context: PageContext,
+): Promise<PageContext> {
+  const archived = await conversations.load(context.url);
+  if (!archived.length || context.status === 'answering') return context;
+  const messages = mergeConversationMessages(
+    archived,
+    context.messages,
+  );
+  const updated = { ...context, messages };
+  await contexts.save(updated);
+  await notify(updated);
+  return updated;
+}
+
+function asPageTab(tab: Browser.tabs.Tab): PageTab | null {
+  if (tab.id == null || !isSupportedUrl(tab.url)) return null;
+  return {
+    id: tab.id,
+    url: tab.url,
+    title: tab.title || new URL(tab.url).hostname,
+    windowId: tab.windowId,
+  };
+}
+
+async function focusTab(tab: Browser.tabs.Tab): Promise<void> {
+  if (tab.id == null) return;
+  await browser.tabs.update(tab.id, { active: true });
+  await browser.windows.update(tab.windowId, { focused: true });
+}
+
+async function waitForTabComplete(
+  tabId: number,
+  timeoutMs = 30_000,
+): Promise<Browser.tabs.Tab> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (tab: Browser.tabs.Tab) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      browser.tabs.onUpdated.removeListener(onUpdated);
+      resolve(tab);
+    };
+    const fail = (cause: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      browser.tabs.onUpdated.removeListener(onUpdated);
+      reject(cause);
+    };
+    const timeout = setTimeout(() => {
+      fail(new Error('原网页加载超时，请稍后重试。'));
+    }, timeoutMs);
+    const onUpdated = (
+      updatedTabId: number,
+      changeInfo: Browser.tabs.OnUpdatedInfo,
+      tab: Browser.tabs.Tab,
+    ) => {
+      if (updatedTabId !== tabId || changeInfo.status !== 'complete') return;
+      finish(tab);
+    };
+    browser.tabs.onUpdated.addListener(onUpdated);
+    void browser.tabs
+      .get(tabId)
+      .then((tab) => {
+        if (tab.status === 'complete') finish(tab);
+      })
+      .catch(fail);
+  });
+}
+
+async function continueConversation(url: string): Promise<void> {
+  const archived = await conversations.get(url);
+  if (!archived) throw new Error('这条学习记录不存在或已被删除。');
+
+  const matchingTabs = (await browser.tabs.query({})).filter(
+    (tab) =>
+      isSupportedUrl(tab.url) &&
+      normalizePageUrl(tab.url) === archived.normalizedUrl,
+  );
+  for (const tab of matchingTabs) {
+    const pageTab = asPageTab(tab);
+    if (!pageTab) continue;
+    const context = await contexts.get(pageTab.id, pageTab.url);
+    if (
+      context?.article &&
+      ['ready', 'partial', 'answering'].includes(context.status)
+    ) {
+      await hydrateArchivedMessages(context);
+      await focusTab(tab);
+      await openAssistant(tab, false);
+      return;
+    }
+  }
+
+  const existingTab = matchingTabs[0];
+  if (existingTab) {
+    await focusTab(existingTab);
+    await openAssistant(existingTab, true);
+    return;
+  }
+
+  const created = await browser.tabs.create({
+    url: archived.normalizedUrl,
+    active: true,
+  });
+  if (created.id == null) throw new Error('无法打开原网页。');
+  const loaded = await waitForTabComplete(created.id);
+  await openAssistant(loaded, true);
+}
+
 async function handleRequest(
   request: ExtensionRequest,
   sender: Browser.runtime.MessageSender,
@@ -530,6 +675,24 @@ async function handleRequest(
           ),
         );
       }
+      case 'history:list':
+        return success(await conversations.list(request.query));
+      case 'history:get':
+        return success(await conversations.get(request.url));
+      case 'history:delete':
+        await clearArchivedConversation(request.url);
+        return success(undefined);
+      case 'history:clear':
+        await clearArchivedConversations();
+        return success(undefined);
+      case 'history:usage':
+        return success(await conversations.usage());
+      case 'history:open':
+        await openHistory();
+        return success(undefined);
+      case 'history:continue':
+        await continueConversation(request.url);
+        return success(undefined);
       case 'settings:open':
         await browser.runtime.openOptionsPage();
         return success(undefined);
@@ -541,10 +704,16 @@ async function handleRequest(
   }
 }
 
-async function openAssistant(tab: Browser.tabs.Tab): Promise<void> {
+async function openAssistant(
+  tab: Browser.tabs.Tab,
+  activate = true,
+): Promise<void> {
   if (tab.id == null || !isSupportedUrl(tab.url)) return;
 
-  const request = { type: 'assistant:open' } satisfies ContentRequest;
+  const request = {
+    type: 'assistant:open',
+    activate,
+  } satisfies ContentRequest;
   try {
     await browser.tabs.sendMessage(tab.id, request);
   } catch {
@@ -557,6 +726,10 @@ async function openAssistant(tab: Browser.tabs.Tab): Promise<void> {
 }
 
 export default defineBackground(() => {
+  void browser.storage.local
+    .setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' })
+    .catch(() => undefined);
+
   browser.action.onClicked.addListener((tab) => {
     void openAssistant(tab);
   });
@@ -575,9 +748,30 @@ export default defineBackground(() => {
             .filter((context) => context.messages.length > 0)
             .map((context) => conversations.save(context)),
         );
+        await notifyHistoryChanged();
       }
       await contexts.deleteTab(tabId);
     })();
   });
 
+  browser.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    const settingsChange = changes[SETTINGS_KEY];
+    const previous = settingsChange?.oldValue as
+      | { retainConversations?: boolean }
+      | undefined;
+    const next = settingsChange?.newValue as
+      | { retainConversations?: boolean }
+      | undefined;
+    if (previous?.retainConversations || !next?.retainConversations) return;
+    void (async () => {
+      const activeContexts = await contexts.listAll();
+      await Promise.all(
+        activeContexts
+          .filter((context) => context.messages.length > 0)
+          .map((context) => conversations.save(context)),
+      );
+      await notifyHistoryChanged();
+    })().catch(() => undefined);
+  });
 });

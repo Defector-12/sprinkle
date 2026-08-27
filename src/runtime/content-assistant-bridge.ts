@@ -47,6 +47,10 @@ export class ContentAssistantBridge implements FloatingAssistantBridge {
     await sendRuntimeRequest<void>({ type: 'study:open' });
   }
 
+  async openHistory(): Promise<void> {
+    await sendRuntimeRequest<void>({ type: 'history:open' });
+  }
+
   async openSettings(): Promise<void> {
     await sendRuntimeRequest<void>({ type: 'settings:open' });
   }

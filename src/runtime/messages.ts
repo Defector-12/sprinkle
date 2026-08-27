@@ -1,5 +1,8 @@
 import type {
+  ArchivedConversation,
   ArticleDocument,
+  ConversationArchiveUsage,
+  ConversationSummary,
   FocusContext,
   PageContext,
 } from '../core/types.ts';
@@ -37,12 +40,19 @@ export type ExtensionRequest =
   | { type: 'focus:set'; focus: FocusContext }
   | { type: 'focus:clear' }
   | { type: 'capture:visible' }
+  | { type: 'history:list'; query?: string }
+  | { type: 'history:get'; url: string }
+  | { type: 'history:delete'; url: string }
+  | { type: 'history:clear' }
+  | { type: 'history:usage' }
+  | { type: 'history:open' }
+  | { type: 'history:continue'; url: string }
   | { type: 'settings:has-key' }
   | { type: 'settings:open' };
 
 export type ContentRequest =
   | { type: 'page:extract' }
-  | { type: 'assistant:open' }
+  | { type: 'assistant:open'; activate?: boolean }
   | { type: 'picker:image:start' }
   | { type: 'picker:region:start' };
 
@@ -67,10 +77,30 @@ export interface ContextChangedEvent {
   context: PageContext;
 }
 
+export interface HistoryChangedEvent {
+  type: 'history:changed';
+}
+
+export interface HistoryApi {
+  list(query?: string): Promise<ConversationSummary[]>;
+  get(url: string): Promise<ArchivedConversation | null>;
+  delete(url: string): Promise<void>;
+  clear(): Promise<void>;
+  usage(): Promise<ConversationArchiveUsage>;
+  continue(url: string): Promise<void>;
+}
+
 export function isContextChangedEvent(
   value: unknown,
 ): value is ContextChangedEvent {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<ContextChangedEvent>;
   return candidate.type === 'context:changed' && Boolean(candidate.context);
+}
+
+export function isHistoryChangedEvent(
+  value: unknown,
+): value is HistoryChangedEvent {
+  if (!value || typeof value !== 'object') return false;
+  return (value as Partial<HistoryChangedEvent>).type === 'history:changed';
 }

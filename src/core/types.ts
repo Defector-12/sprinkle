@@ -143,6 +143,29 @@ export interface ChatMessage {
   error?: boolean;
 }
 
+export interface ArchivedConversation {
+  schemaVersion: 2;
+  normalizedUrl: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ConversationSummary {
+  normalizedUrl: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  questionCount: number;
+  lastQuestion: string;
+}
+
+export interface ConversationArchiveUsage {
+  bytesInUse: number;
+  quotaBytes: number;
+}
+
 export interface PageContext {
   key: string;
   tabId: number;

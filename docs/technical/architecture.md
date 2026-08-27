@@ -4,7 +4,7 @@
 
 在不建设账号、计费和业务服务端的前提下，实现一个 Chrome / Edge Manifest V3 插件：
 
-- 网页默认保持休眠；只有用户点击工具栏图标后才解析页面并显示悬浮助手。
+- 网页默认保持休眠；只有用户点击工具栏图标或从学习记录继续提问后才解析页面并显示悬浮助手。
 - 页面正文和对话上下文按标签页与 URL 隔离。
 - 选中文字可以与文章相关片段组成文本问题。
 - 上传或粘贴本地图片、点选页面图片或框选可见区域可以组成多模态问题。
@@ -35,6 +35,14 @@ Floating Assistant
                  -> structured article reader
                  -> resizable split panes
                  -> targeted context / focus / chat messages
+
+Floating Assistant / Study Workspace
+  -> runtime message("history:open")
+       -> Background opens library.html
+            -> Learning History (React)
+                 -> storage.local conversation list and search
+                 -> conversation detail / deletion
+                 -> resume on the original page
 ```
 
 ### Floating Assistant
@@ -84,6 +92,16 @@ Floating Assistant
 - 划词后在选区附近提供快捷提问；点图模式直接构造 `FocusContext`；区域引用先截取当前工作台可见区域，再写入临时上下文。
 - 工作台双栏按可用视口约束最小阅读和对话宽度；不足以容纳双栏时切换为上下布局，以兼容侧置标签栏和窄窗口。
 - 原标签页关闭后其 session 上下文被清除，工作台下次操作时明确提示上下文失效。
+
+### Learning History
+
+- 是 WXT 未列出 HTML 入口 `library.html`，不会覆盖浏览器原生历史页。
+- 按规范化 URL 展示一条持续增长的页面级会话，支持搜索标题、URL、问题和回答。
+- 网址索引与问答详情之间使用低对比度拖拽分隔区，支持键盘调宽，并可完全收起或展开网址索引。
+- 只展示长期归档的完整问答；图片和截图仅保留类型、章节和文字说明。
+- “继续提问”优先复用仍然有效的原标签页上下文，无有效上下文时打开原网址并显式重新解析。
+- 单条删除和全部删除同时清理匹配的 session 消息，避免关闭标签页时重新归档已删除内容。
+- 页面通过 Background 访问归档，不直接读取扩展本地存储。
 
 ## 3. 页面身份与生命周期
 
@@ -192,6 +210,14 @@ article -> main -> [role="main"] -> body
 
 模型确定后，可以在不改变上层接口的前提下替换为向量或混合检索。
 
+### 对话长期记忆
+
+- 每个规范化 URL 保留完整的长期问答记录。
+- 历史总量不超过 48,000 字符时，完整加入模型请求。
+- 超过预算时，最近 6 轮最多使用 24,000 字符，其余预算从全部旧问答中召回最多 6 轮相关内容。
+- 旧问答复用本地词项重合检索，不产生额外模型调用；最终按原始时间顺序发送。
+- 未回答问题和错误消息不会进入长期记忆；超长内容只在请求构建时截断，不修改归档原文。
+
 ### 回答约束
 
 系统提示词要求：
@@ -240,8 +266,15 @@ VITE_MODEL_ID
 保存：
 
 - DeepSeek API Key
-- 对话保留开关
-- 用户主动选择保留的问答文本
+- 学习记录保存开关，默认关闭
+- 用户主动选择保留的完整问答文本
+
+学习记录使用 `context-reader:conversation:{normalizedUrl}` 独立存储：
+
+- V2 记录包含 `schemaVersion`、规范化 URL、标题、完整消息、创建时间和更新时间。
+- V1 记录在读取时兼容，并在下一次写入时升级。
+- 同 URL 写入在 Background 内串行执行，按消息 ID 合并去重。
+- 达到本地存储容量的 80% 时提示用户；写入失败不会删除旧记录。
 
 不保存：
 
@@ -253,9 +286,10 @@ VITE_MODEL_ID
 - Content Script 无权读取 API Key。
 - 两个 API Key 都不进入 DOM、普通日志、模型消息和对话归档。
 - 模型请求只从 Background 发出。
-- 页面理解只由用户点击工具栏图标触发，并且只发生在浏览器本地。
+- 页面理解只由用户点击工具栏图标或“继续提问”等明确操作触发，并且只发生在浏览器本地。
 - 用户发送问题后才调用模型 API；Content Script 只能获得“是否已配置 Key”的布尔状态。
-- 清除当前上下文时，同时删除该 URL 的本地对话归档。
+- 停止理解只清除临时页面上下文，不删除本地学习记录。
+- 删除学习记录必须由用户在历史页或设置页显式确认。
 
 ## 9. 验证策略
 

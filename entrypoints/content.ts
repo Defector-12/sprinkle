@@ -577,7 +577,10 @@ export default defineContentScript({
         case 'page:extract':
           return Promise.resolve(extractArticle(document, location.href));
         case 'assistant:open':
-          window.setTimeout(() => openFloatingAssistant(true), 0);
+          window.setTimeout(
+            () => openFloatingAssistant(request.activate !== false),
+            0,
+          );
           return Promise.resolve({ ok: true });
         case 'picker:image:start':
           startImagePicker(() => openFloatingAssistant(false));

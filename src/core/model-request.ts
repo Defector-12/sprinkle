@@ -1,10 +1,10 @@
+import { selectConversationHistory } from './conversation-memory.ts';
 import type {
   ArticleChunk,
   ArticleDocument,
   ChatMessage,
   FocusContext,
   ModelContentPart,
-  ModelMessage,
   ModelRequest,
 } from './types.ts';
 
@@ -77,21 +77,6 @@ function currentUserContent(
   ];
 }
 
-function recentCompletedHistory(history: ChatMessage[]): ModelMessage[] {
-  const completed: ModelMessage[] = [];
-  for (let index = 0; index < history.length - 1; index += 1) {
-    const user = history[index];
-    const assistant = history[index + 1];
-    if (user?.role !== 'user' || assistant?.role !== 'assistant') continue;
-    completed.push(
-      { role: 'user', content: user.content },
-      { role: 'assistant', content: assistant.content },
-    );
-    index += 1;
-  }
-  return completed.slice(-8);
-}
-
 export function buildModelRequest(
   input: BuildModelRequestInput,
 ): ModelRequest {
@@ -113,7 +98,10 @@ export function buildModelRequest(
     articleContext(input.article, input.relevantChunks),
   ].join('\n');
 
-  const history = recentCompletedHistory(input.history);
+  const history = selectConversationHistory(input.history, {
+    question: input.question,
+    focusText: input.focus?.text,
+  });
 
   return {
     messages: [

@@ -147,6 +147,10 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
     });
   }
 
+  async openHistory(): Promise<void> {
+    await sendRuntimeRequest<void>({ type: 'history:open' });
+  }
+
   async open(): Promise<void> {
     const params = new URLSearchParams({
       tabId: String(this.target.tabId),

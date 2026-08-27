@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { get, set, remove } = vi.hoisted(() => ({
+const { get, set, remove, sendMessage } = vi.hoisted(() => ({
   get: vi.fn(),
   set: vi.fn(),
   remove: vi.fn(),
+  sendMessage: vi.fn(),
 }));
 
 vi.mock('wxt/browser', () => ({
   browser: {
+    runtime: { sendMessage },
     storage: {
       local: { get, set, remove },
       session: { get: vi.fn(), set: vi.fn(), remove: vi.fn() },
@@ -25,6 +27,7 @@ describe('settings store', () => {
     get.mockReset();
     set.mockReset();
     remove.mockReset();
+    sendMessage.mockReset();
   });
 
   it('loads existing DeepSeek settings without requiring a vision key', async () => {
@@ -55,5 +58,13 @@ describe('settings store', () => {
     expect(set).toHaveBeenCalledWith({
       'context-reader:settings': settings,
     });
+  });
+
+  it('clears conversations through background so active sessions are updated', async () => {
+    sendMessage.mockResolvedValue({ ok: true, data: undefined });
+
+    await new BrowserSettingsStore().clearConversations();
+
+    expect(sendMessage).toHaveBeenCalledWith({ type: 'history:clear' });
   });
 });
