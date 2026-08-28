@@ -83,6 +83,38 @@ describe('extractArticle', () => {
       .toBe('Keep the source structure\nKeep the conversation visible');
   });
 
+  it('keeps the heading hierarchy when subsection names repeat', () => {
+    document.body.innerHTML = `
+      <article>
+        <h1>AI-native SDLC</h1>
+        <h2>Build</h2>
+        <h3>CLAUDE.md as shared context</h3>
+        <h4>Governance considerations</h4>
+        <p>Code owners approve changes to CLAUDE.md.</p>
+        <h2>Test</h2>
+        <h3>Give Claude a feedback loop</h3>
+        <h4>Governance considerations</h4>
+        <p>Verification must run before a task is reported done.</p>
+      </article>
+    `;
+
+    const article = extractArticle(
+      document,
+      'https://example.com/ai-native-sdlc',
+    );
+
+    expect(
+      article.blocks.find((block) =>
+        block.text.startsWith('Code owners approve'),
+      )?.section,
+    ).toBe('Build > CLAUDE.md as shared context > Governance considerations');
+    expect(
+      article.blocks.find((block) =>
+        block.text.startsWith('Verification must run'),
+      )?.section,
+    ).toBe('Test > Give Claude a feedback loop > Governance considerations');
+  });
+
   it('extracts inline SVG and canvas charts with their document positions', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(
       'data:image/png;base64,chart',
@@ -336,6 +368,34 @@ describe('extractArticle', () => {
         fallbackUsed: true,
         fallbackBlockCount: 2,
       }),
+    );
+  });
+
+  it('keeps bold labels in custom key-value content', () => {
+    document.body.innerHTML = `
+      <article>
+        <h1>Verification guide</h1>
+        <h2>Test</h2>
+        <h3>Give Claude a feedback loop</h3>
+        <div class="key-value-grid">
+          <div><b>What is enforced</b></div>
+          <div>${'Verification must run before a task is reported done. '.repeat(3)}</div>
+          <div><strong>What the evidence is</strong></div>
+          <div>${'The literal output of make test comes from the toolchain. '.repeat(3)}</div>
+        </div>
+      </article>
+    `;
+
+    const article = extractArticle(
+      document,
+      'https://example.com/verification-guide',
+    );
+    const text = article.blocks.map((block) => block.text);
+
+    expect(text).toContain('What is enforced');
+    expect(text).toContain('What the evidence is');
+    expect(text).toContain(
+      'Verification must run before a task is reported done. '.repeat(3).trim(),
     );
   });
 

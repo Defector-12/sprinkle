@@ -160,6 +160,68 @@ describe('article retrieval', () => {
     expect(results[0]?.text).toContain('vector database');
   });
 
+  it('keeps a focused question near its document anchor instead of recalling similarly named sections', () => {
+    const chunks: ArticleChunk[] = [
+      {
+        id: 'build-governance',
+        section: 'Build > CLAUDE.md > Governance considerations',
+        text: 'CLAUDE.md is version controlled and code owners approve changes.',
+        blockIds: ['build-governance'],
+      },
+      {
+        id: 'skills-governance',
+        section: 'Build > Skills > Governance considerations',
+        text: 'Skills are advisory controls backed by deterministic hooks.',
+        blockIds: ['skills-governance'],
+      },
+      {
+        id: 'test-execution',
+        section: 'Test > Give Claude a feedback loop > How to execute it',
+        text: 'Require build, test, and lint evidence before completion.',
+        blockIds: ['test-execution'],
+      },
+      {
+        id: 'test-verification',
+        section:
+          'Test > Give Claude a feedback loop > What it looks like (CLAUDE.md verification block)',
+        text: [
+          'What it looks like (CLAUDE.md verification block)',
+          'Verification before a task is reported done, and block edits to test files during a fix.',
+        ].join('\n'),
+        blockIds: ['test-verification'],
+      },
+      {
+        id: 'test-measurement',
+        section: 'Test > Give Claude a feedback loop > How to measure it',
+        text: 'Measure first-pass CI success rate and review time per PR.',
+        blockIds: ['test-measurement'],
+      },
+      {
+        id: 'deploy-governance',
+        section: 'Deploy > Governance considerations',
+        text: 'Deployment approvals are recorded in the release workflow.',
+        blockIds: ['deploy-governance'],
+      },
+    ];
+
+    const results = retrieveRelevantChunks(chunks, {
+      question: '我问的是这一部分',
+      focusText: 'Governance considerations',
+      focusSection:
+        'Test > Give Claude a feedback loop > What it looks like (CLAUDE.md verification block)',
+      limit: 6,
+    });
+
+    expect(results.map((chunk) => chunk.id)).toEqual([
+      'test-verification',
+      'test-measurement',
+      'test-execution',
+    ]);
+    expect(results.map((chunk) => chunk.id)).not.toContain(
+      'build-governance',
+    );
+  });
+
   it('supports Chinese terms without requiring whitespace tokenization', () => {
     const chineseBlocks: ArticleBlock[] = [
       {

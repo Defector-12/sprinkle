@@ -266,6 +266,7 @@ async function performAskPage(
   const selectedContext = selectArticleContext(chunks, {
     question,
     focusText: current.focus?.text,
+    focusSection: current.focus?.section,
     limit: 6,
   });
   const request = buildModelRequest({

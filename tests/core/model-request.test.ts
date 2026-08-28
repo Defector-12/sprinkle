@@ -47,6 +47,9 @@ describe('buildModelRequest', () => {
     expect(request.messages[0]?.content).toContain(
       '优先依据当前文章语境回答',
     );
+    expect(request.messages[0]?.content).toContain(
+      '不得切换到其他相似章节',
+    );
     expect(request.messages[0]?.content).toContain('不要提供原文出处');
     expect(request.messages[0]?.content).not.toContain(
       'Short-term memory keeps the current task state.',
@@ -87,6 +90,52 @@ describe('buildModelRequest', () => {
       'assistant',
       'user',
     ]);
+  });
+
+  it('does not carry previous answers into a newly focused question', () => {
+    const history: ChatMessage[] = [
+      {
+        id: 'user-wrong',
+        role: 'user',
+        content: 'Explain the governance section.',
+        createdAt: 1,
+      },
+      {
+        id: 'assistant-wrong',
+        role: 'assistant',
+        content: 'CLAUDE.md is version controlled and reviewed by code owners.',
+        createdAt: 2,
+      },
+    ];
+
+    const request = buildModelRequest({
+      article,
+      question: 'Translate this selected section.',
+      relevantChunks: [
+        {
+          id: 'test-verification',
+          section: 'Test > Give Claude a feedback loop',
+          text: 'Verification must run before a task is reported done.',
+          blockIds: ['test-verification'],
+        },
+      ],
+      history,
+      focus: {
+        type: 'text',
+        text: 'Governance considerations',
+        section: 'Test > Give Claude a feedback loop',
+      },
+    });
+    const serialized = JSON.stringify(request.messages);
+
+    expect(request.messages.map((item) => item.role)).toEqual([
+      'system',
+      'user',
+    ]);
+    expect(serialized).toContain(
+      'Verification must run before a task is reported done.',
+    );
+    expect(serialized).not.toContain('reviewed by code owners');
   });
 
   it('excludes unanswered history and keeps complete history within budget', () => {

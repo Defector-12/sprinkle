@@ -189,6 +189,7 @@ export function overlapScore(
 export interface RetrievalQuery {
   question: string;
   focusText?: string;
+  focusSection?: string;
   limit?: number;
 }
 
@@ -218,25 +219,97 @@ export function retrieveRelevantChunks(
 ): ArticleChunk[] {
   const questionTokens = tokensFor(query.question);
   const focusTokens = tokensFor(query.focusText ?? '');
+  const focusSectionTokens = tokensFor(query.focusSection ?? '');
   const limit = Math.max(1, query.limit ?? 5);
+  const normalizedFocus = (query.focusText ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  const normalizedFocusSection = (query.focusSection ?? '')
+    .toLowerCase()
+    .trim();
 
-  return chunks
-    .map((chunk, index) => {
-      const combined = `${chunk.section}\n${chunk.text}`;
-      const questionScore = overlapScore(questionTokens, combined);
-      const focusScore = overlapScore(focusTokens, combined);
-      const exactSectionBonus = query.question
-        .toLowerCase()
-        .includes(chunk.section.toLowerCase())
-        ? 0.15
+  const scored = chunks.map((chunk, index) => {
+    const combined = `${chunk.section}\n${chunk.text}`;
+    const questionScore = overlapScore(questionTokens, combined);
+    const focusScore = overlapScore(focusTokens, combined);
+    const focusSectionScore = overlapScore(
+      focusSectionTokens,
+      chunk.section,
+    );
+    const exactSectionBonus = query.question
+      .toLowerCase()
+      .includes(chunk.section.toLowerCase())
+      ? 0.15
+      : 0;
+    const normalizedCombined = combined
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+    const exactFocusBonus =
+      normalizedFocus && normalizedCombined.includes(normalizedFocus)
+        ? 0.5
+        : 0;
+    const exactFocusSectionBonus =
+      normalizedFocusSection &&
+      chunk.section.toLowerCase() === normalizedFocusSection
+        ? 0.5
         : 0;
 
-      return {
-        chunk,
-        index,
-        score: questionScore * 0.7 + focusScore * 0.3 + exactSectionBonus,
-      };
-    })
+    return {
+      chunk,
+      index,
+      focusAnchorScore:
+        focusScore +
+        focusSectionScore * 0.5 +
+        exactFocusBonus +
+        exactFocusSectionBonus,
+      score: questionScore * 0.7 + focusScore * 0.3 + exactSectionBonus,
+    };
+  });
+
+  if (focusTokens.size || focusSectionTokens.size) {
+    const exactSectionCandidates = normalizedFocusSection
+      ? scored.filter(
+          ({ chunk }) =>
+            chunk.section.toLowerCase() === normalizedFocusSection,
+        )
+      : [];
+    const anchor = (
+      exactSectionCandidates.length ? exactSectionCandidates : scored
+    ).toSorted(
+      (left, right) =>
+        right.focusAnchorScore - left.focusAnchorScore ||
+        left.index - right.index,
+    )[0];
+    if (anchor && anchor.focusAnchorScore > 0) {
+      const anchorPath = anchor.chunk.section.split(' > ');
+      const parentPath =
+        anchorPath.length >= 3
+          ? anchorPath.slice(0, -1).join(' > ')
+          : '';
+      const neighborIndexes = [
+        anchor.index,
+        anchor.index + 1,
+        anchor.index - 1,
+        anchor.index + 2,
+        anchor.index - 2,
+      ];
+      const selectedIndexes = neighborIndexes
+        .filter((index) => index >= 0 && index < chunks.length)
+        .filter((index) => {
+          if (index === anchor.index) return true;
+          const section = (chunks[index] as ArticleChunk).section;
+          return (
+            section === anchor.chunk.section ||
+            Boolean(parentPath && section.startsWith(`${parentPath} > `))
+          );
+        })
+        .slice(0, Math.min(limit, 3));
+      return selectedIndexes.map((index) => chunks[index] as ArticleChunk);
+    }
+  }
+
+  return scored
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .slice(0, limit)
     .map(({ chunk }) => chunk);

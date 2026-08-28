@@ -438,10 +438,14 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     const selection = window.getSelection();
     const text = selection?.toString().replace(/\s+/g, ' ').trim() ?? '';
     if (!selection || !text || selection.isCollapsed) return null;
+    const node =
+      selection.rangeCount > 0
+        ? selection.getRangeAt(0).startContainer ?? selection.anchorNode
+        : selection.anchorNode;
     const element =
-      selection.anchorNode?.nodeType === Node.ELEMENT_NODE
-        ? (selection.anchorNode as Element)
-        : selection.anchorNode?.parentElement;
+      node?.nodeType === Node.ELEMENT_NODE
+        ? (node as Element)
+        : node?.parentElement;
     return {
       text,
       section:

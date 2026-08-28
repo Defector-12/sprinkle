@@ -4,7 +4,10 @@ import { browser } from 'wxt/browser';
 import { defineContentScript } from 'wxt/utils/define-content-script';
 
 import { FloatingAssistant } from '../src/components/FloatingAssistant.tsx';
-import { extractArticle } from '../src/core/article-extractor.ts';
+import {
+  extractArticle,
+  sectionPathForElement,
+} from '../src/core/article-extractor.ts';
 import type { FocusContext } from '../src/core/types.ts';
 import {
   publishAssistantOpen,
@@ -29,22 +32,10 @@ function cleanText(value: string | null | undefined): string {
 }
 
 function sectionFor(element: Element | null): string {
-  if (!element) return cleanText(document.querySelector('h1')?.textContent);
-  let section = cleanText(document.querySelector('h1')?.textContent);
-  for (const heading of document.querySelectorAll(
-    'h1, h2, h3, h4, h5, h6',
-  )) {
-    if (
-      heading === element ||
-      heading.compareDocumentPosition(element) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ) {
-      section = cleanText(heading.textContent) || section;
-      continue;
-    }
-    break;
-  }
-  return section || document.title;
+  const fallback =
+    cleanText(document.querySelector('h1')?.textContent) ||
+    document.title;
+  return sectionPathForElement(document, element, fallback);
 }
 
 function createSelectionButton(): HTMLButtonElement {
@@ -100,7 +91,7 @@ function installTextSelection(openAssistant: () => void): () => void {
 
     const range = selection.getRangeAt(0);
     const rect = range.getBoundingClientRect();
-    const node = range.commonAncestorContainer;
+    const node = range.startContainer;
     selectedElement =
       node.nodeType === Node.ELEMENT_NODE
         ? (node as Element)

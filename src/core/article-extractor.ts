@@ -52,7 +52,7 @@ const CUSTOM_CONTENT_ROOT_SELECTOR = [
   '[data-testid="tweetText"]',
 ].join(',');
 
-const CUSTOM_TEXT_ELEMENT_SELECTOR = 'div, span';
+const CUSTOM_TEXT_ELEMENT_SELECTOR = 'div, span, strong, b';
 const CUSTOM_TEXT_EXCLUDED_ANCESTORS = [
   EXCLUDED_ANCESTORS,
   CONTENT_SELECTOR,
@@ -132,6 +132,64 @@ function blockTypeFor(element: Element): ArticleBlockType {
 function headingLevel(element: Element): number | undefined {
   const match = /^h([1-6])$/i.exec(element.tagName);
   return match?.[1] ? Number(match[1]) : undefined;
+}
+
+function headingPathLabel(
+  headings: Map<number, string>,
+  fallback: string,
+): string {
+  const entries = [...headings.entries()].sort(
+    ([left], [right]) => left - right,
+  );
+  const subsectionEntries = entries.filter(([level]) => level > 1);
+  return (subsectionEntries.length ? subsectionEntries : entries)
+    .map(([, text]) => text)
+    .filter(Boolean)
+    .join(' > ') || fallback;
+}
+
+function updateHeadingPath(
+  headings: Map<number, string>,
+  level: number,
+  text: string,
+  fallback: string,
+): string {
+  for (const existingLevel of headings.keys()) {
+    if (existingLevel >= level) headings.delete(existingLevel);
+  }
+  if (text) headings.set(level, text);
+  return headingPathLabel(headings, fallback);
+}
+
+export function sectionPathForElement(
+  root: ParentNode,
+  target: Element | null,
+  fallback: string,
+): string {
+  if (!target) return fallback;
+  const headings = new Map<number, string>();
+  let section = fallback;
+
+  for (const heading of root.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+    const isBeforeOrContainsTarget =
+      heading === target ||
+      heading.contains(target) ||
+      Boolean(
+        heading.compareDocumentPosition(target) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    if (!isBeforeOrContainsTarget) break;
+    const level = headingLevel(heading);
+    if (!level) continue;
+    section = updateHeadingPath(
+      headings,
+      level,
+      cleanText(heading.textContent),
+      fallback,
+    );
+  }
+
+  return section;
 }
 
 function isTableOfContentsList(element: Element): boolean {
@@ -288,19 +346,7 @@ function compareDocumentOrder(
 }
 
 function findSection(root: Element, target: Element, fallback: string): string {
-  let section = fallback;
-  const headings = root.querySelectorAll('h1, h2, h3, h4, h5, h6');
-
-  for (const heading of headings) {
-    const relationship = heading.compareDocumentPosition(target);
-    if (relationship & Node.DOCUMENT_POSITION_FOLLOWING) {
-      section = cleanText(heading.textContent) || section;
-      continue;
-    }
-    break;
-  }
-
-  return section;
+  return sectionPathForElement(root, target, fallback);
 }
 
 function nearbyText(image: Element): string {
@@ -493,6 +539,7 @@ export function extractArticle(
     new URL(pageUrl).hostname;
 
   let currentSection = title;
+  const headingPath = new Map<number, string>();
   const blocks: ArticleBlock[] = [];
   const blockElements: Element[] = [];
   const candidateBlocks = root.querySelectorAll(CONTENT_SELECTOR);
@@ -520,9 +567,15 @@ export function extractArticle(
       continue;
     }
 
-    if (type === 'heading') currentSection = text;
-
     const level = headingLevel(element);
+    if (type === 'heading' && level) {
+      currentSection = updateHeadingPath(
+        headingPath,
+        level,
+        text,
+        title,
+      );
+    }
     blocks.push({
       id: `block-${blocks.length + 1}`,
       type,
@@ -562,8 +615,16 @@ export function extractArticle(
         ...recoveredEntries,
       ].sort(compareDocumentOrder);
       let section = title;
+      const orderedHeadingPath = new Map<number, string>();
       const orderedBlocks = entries.map(({ block }, index) => {
-        if (block.type === 'heading') section = block.text;
+        if (block.type === 'heading' && block.level) {
+          section = updateHeadingPath(
+            orderedHeadingPath,
+            block.level,
+            block.text,
+            title,
+          );
+        }
         return {
           ...block,
           id: `block-${index + 1}`,
