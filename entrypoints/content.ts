@@ -160,7 +160,7 @@ function mountFloatingAssistant(): MountedAssistant {
     .querySelector(`[${UI_ATTRIBUTE}="assistant-root"]`)
     ?.remove();
 
-  const host = document.createElement('context-reader-assistant');
+  const host = document.createElement('div');
   host.setAttribute(UI_ATTRIBUTE, 'assistant-root');
   const shadow = host.attachShadow({ mode: 'open' });
   const style = document.createElement('style');

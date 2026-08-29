@@ -53,6 +53,7 @@ Floating Assistant / Study Workspace
 - 悬浮球可拖动；展开后的对话卡片可通过标题区移动位置，并通过持续可见的底角缩放柄或键盘调整整体尺寸。
 - 基于 `visualViewport` 约束悬浮球和卡片，浏览器缩放后自动回收到可见区域。
 - 通过 Shadow DOM 隔离网页样式，并阻止交互事件冒泡到宿主页面。
+- Shadow host 使用标准 `div`，避免 Reddit 等 Web Components 站点通过 `:not(:defined)` 隐藏未注册自定义标签。
 - 工具栏与悬浮助手通过 isolated world 内的私有事件通道通信，网页脚本不能伪造激活事件。
 - 不直接访问 API Key，也不直接请求模型。
 
