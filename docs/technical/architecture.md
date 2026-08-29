@@ -1,311 +1,292 @@
-# Context Reader MVP 技术方案
+# Context Reader 工程接手手册
 
-## 1. 技术目标
+> 技术栈：WXT 0.20 / React 19 / TypeScript 7 / Vitest 4 / MV3
+> 运行要求：Node.js 22.13+，pnpm 11
+> 当前基线：`main@f3b1bbf`，150 项测试，Chrome/Edge 构建通过
 
-在不建设账号、计费和业务服务端的前提下，实现一个 Chrome / Edge Manifest V3 插件：
+本文是后续 Agent 的工程入口。产品行为以 [产品基线](../product/mvp-prd.md) 为准；README 用于安装和运行，不应承载架构决策。
 
-- 网页默认保持休眠；只有用户点击工具栏图标或从学习记录继续提问后才解析页面并显示悬浮助手。
-- 页面正文和对话上下文按标签页与 URL 隔离。
-- 选中文字可以与文章相关片段组成文本问题。
-- 上传或粘贴本地图片、点选页面图片或框选可见区域可以组成多模态问题。
-- API Key 不进入网页上下文。
-- 页面关闭后清理临时正文。
-
-## 2. 运行时结构
+## 1. 系统总览
 
 ```text
 Browser Action
-  -> tabs.sendMessage("assistant:open")
-       -> Content Script + Shadow DOM
-            -> Floating Assistant (React)
-            -> runtime message("context:activate")
-            -> article extraction
-            -> text selection
-            -> local image upload or paste / page image / visible-region capture
-            -> runtime message
-                 -> Background Service Worker
-                      -> storage.session: PageContext
-                      -> storage.local: Settings / optional messages
-                      -> Model API
+  -> Content Script (isolated world)
+       -> 标准 div Shadow host
+       -> FloatingAssistant
+       -> 页面解析 / 划词 / 点图 / 框选
+       -> runtime message
+            -> Background Service Worker
+                 -> PageContext 编排
+                 -> storage.session
+                 -> storage.local
+                 -> DeepSeek Chat Completions
 
-Floating Assistant
-  -> runtime message("study:open")
-       -> Background opens study.html?tabId&url
-            -> Study Workspace (React)
-                 -> structured article reader
-                 -> resizable split panes
-                 -> targeted context / focus / chat messages
+FloatingAssistant
+  -> study.html?tabId&url
+       -> StudyWorkspace
+            -> 重建文章 + 同一 PageContext 对话
 
-Floating Assistant / Study Workspace
-  -> runtime message("history:open")
-       -> Background opens library.html
-            -> Learning History (React)
-                 -> storage.local conversation list and search
-                 -> conversation detail / deletion
-                 -> resume on the original page
+FloatingAssistant / StudyWorkspace
+  -> library.html
+       -> HistoryLibrary
+            -> 本地学习记录 / 搜索 / 删除 / 继续提问
 ```
 
-### Floating Assistant
+没有 Side Panel、业务服务端、账号系统或数据库服务。所有敏感配置和数据都在用户浏览器中。
 
-- 未启用页面渲染为空，不读取页面内容。
-- 工具栏点击后展开卡片并显式进入页面理解流程；收起后以 48px 悬浮球靠边显示。
-- 展示未配置 API Key、理解中、已就绪、回答中和失败状态。
-- 悬浮球可拖动；展开后的对话卡片可通过标题区移动位置，并通过持续可见的底角缩放柄或键盘调整整体尺寸。
-- 基于 `visualViewport` 约束悬浮球和卡片，浏览器缩放后自动回收到可见区域。
-- 通过 Shadow DOM 隔离网页样式，并阻止交互事件冒泡到宿主页面。
-- Shadow host 使用标准 `div`，避免 Reddit 等 Web Components 站点通过 `:not(:defined)` 隐藏未注册自定义标签。
-- 工具栏与悬浮助手通过 isolated world 内的私有事件通道通信，网页脚本不能伪造激活事件。
-- 不直接访问 API Key，也不直接请求模型。
+## 2. 入口与职责
 
-### Content Script
+### `entrypoints/content.ts`
 
-- 只运行在 HTTP / HTTPS 页面。
-- 在 `document_idle` 阶段挂载休眠的悬浮助手，但不请求页面解析。
-- 只有已启用页面才开放轻量文字快捷入口。
-- 图片点选、双击引用和区域框选只在页面启用后生效，捕获结果写入临时页面上下文。
-- 截图前后校验活动标签页身份，并按 `visualViewport` 映射缩放后的裁剪坐标。
-- Manifest 使用 `<all_urls>` 满足 `captureVisibleTab` 对扩展工作台页面的权限要求；截图仍只由显式图片/区域操作触发。
-- 将选择结果发送给 Background，不持久化数据。
+- 匹配所有 HTTP/HTTPS 页面，在 `document_idle` 挂载休眠助手。
+- 工具栏消息到达前不解析正文。
+- 承担 DOM 提取、选区定位、页面图片引用和可见区域裁剪。
+- UI 使用标准 `div` 作为 Shadow host。不要改回未注册自定义标签，否则 Reddit 的 `:not(:defined)` 会将整个插件设为 `visibility: hidden`。
+- 通过模块内私有事件打开 React 助手，严禁恢复为网页可伪造的公开 `window` 事件。
 
-### Background Service Worker
+### `entrypoints/background.ts`
 
-- 是页面上下文、模型请求和存储清理的唯一编排入口。
-- 优先根据消息发送者识别页面，避免标签切换时串用活动标签页。
-- 异步解析和回答提交前重新校验 `tabId + URL`，过期操作不会覆盖新页面状态。
-- 从 Content Script 获取页面结构与选择结果。
-- 从扩展本地存储读取 API Key，并直接请求模型。
-- 监听标签页关闭事件并清除对应临时上下文。
+- 唯一的页面上下文、问答、模型、归档和标签页生命周期编排器。
+- 工具栏点击先向 Content Script 发消息；未注入时使用 `browser.scripting.executeScript` 补注入。
+- 所有异步解析和回答都用 `pageKey + generation` 校验，过期结果不得覆盖新页面。
+- 同一页面只允许一个回答请求进行。
+- 模型请求只从这里发出。
 
-### Study Workspace
+### 扩展页面
 
-- 是 WXT 未列出 HTML 入口 `study.html`，由悬浮窗显式打开为独立标签页。
-- 通过不可变的 `tabId + URL` 读取和更新原页面上下文，不依赖当前活动标签页。
-- 左侧根据 `ArticleDocument` 重建语义化阅读视图，并按提取顺序回填图片和图表，避免外站 `X-Frame-Options` 和 CSP 阻止 iframe。
-- 目录由已提取标题及其层级生成，点击后滚动到对应标题；原文中的锚点目录列表不会重复进入正文。
-- 表格使用原生语义表格安全重建；公式使用白名单 MathML，缺失 MathML 时回退为 TeX 文本。
-- 右侧复用后台问答编排、DeepSeek 模型标签和消息归档。
-- 只有当前视图主动提问后收到的新回答才逐字揭示；初始化、刷新和跨视图同步的历史内容直接完整显示，并遵循 `prefers-reduced-motion`。
-- 对话达到三轮提问后，在消息滚动区右侧显示共享的问题历史导航；默认仅呈现低对比度短线，悬停展开单行摘要，点击平滑定位用户消息。
-- 助手消息通过 `react-markdown` 与 `remark-gfm` 渲染；原始 HTML 与远程图片被忽略，外部链接使用独立标签页打开。
-- 用户消息保存发送瞬间的 `MessageReference`。会话内图片引用保留预览，长期归档仅保留类型、章节和说明，不持久化截图数据。
-- 悬浮窗与工作台共享输入体验：内容驱动高度、发送后跟随消息末端、可切换全空间编辑模式。
-- 普通模式下 Enter 发送、Shift+Enter 换行；全空间编辑模式下 Enter 始终换行，只能通过发送按钮提交。
-- 划词后在选区附近提供快捷提问；点图模式直接构造 `FocusContext`；区域引用先截取当前工作台可见区域，再写入临时上下文。
-- 工作台双栏按可用视口约束最小阅读和对话宽度；不足以容纳双栏时切换为上下布局，以兼容侧置标签栏和窄窗口。
-- 原标签页关闭后其 session 上下文被清除，工作台下次操作时明确提示上下文失效。
+- `study.html`：绑定不可变 `tabId + URL`，不依赖当前活动标签页。
+- `library.html`：只通过 Background 访问归档，不直接读取业务存储。
+- `options.html`：保存 DeepSeek API Key、学习记录开关和清除操作。
 
-### Learning History
+## 3. 核心数据与身份
 
-- 是 WXT 未列出 HTML 入口 `library.html`，不会覆盖浏览器原生历史页。
-- 按规范化 URL 展示一条持续增长的页面级会话，支持搜索标题、URL、问题和回答。
-- 网址索引与问答详情之间使用低对比度拖拽分隔区，支持键盘调宽，并可完全收起或展开网址索引。
-- 只展示长期归档的完整问答；图片和截图仅保留类型、章节和文字说明。
-- “继续提问”优先复用仍然有效的原标签页上下文，无有效上下文时打开原网址并显式重新解析。
-- 单条删除和全部删除同时清理匹配的 session 消息，避免关闭标签页时重新归档已删除内容。
-- 页面通过 Background 访问归档，不直接读取扩展本地存储。
-
-## 3. 页面身份与生命周期
-
-### 页面键
+### 页面身份
 
 ```text
-pageKey = tabId + ":" + normalize(url)
+pageKey = tabId + ":" + normalizePageUrl(url)
 ```
 
-URL 规范化规则：
+`normalizePageUrl`：
 
-- 移除 hash。
+- 移除普通 hash，保留 `#/...` 和 `#!/...` 路由。
 - 移除 `utm_*`、`fbclid`、`gclid`、`mc_cid`、`mc_eid`、`ref_src`。
-- 保留并排序其他 query 参数。
-- 非根路径移除末尾 `/`。
+- 保留并排序其他查询参数。
+- 非根路径去掉末尾 `/`。
 
-### 生命周期
+### `PageContext`
+
+核心字段：
 
 ```text
-UNACTIVATED
-  --browser action--> PARSING
-
-PARSING
-  -> READY | PARTIAL | FAILED
-
-READY | PARTIAL
-  -> ANSWERING
-  -> READY | PARTIAL
-
-ANY ACTIVE STATE
-  --stop understanding--> UNACTIVATED
+tabId / url / normalizedUrl / title
+status
+article
+focus
+messages
+warning / updatedAt
 ```
 
-- 新 URL 只创建 `UNACTIVATED` 上下文，不读取 DOM。
-- 返回同一标签页内的旧 URL 时恢复已有上下文。
-- 页面刷新不会自动重新解析；再次点击工具栏图标才刷新页面理解结果。
-- 标签页关闭后删除该标签页的全部 `PageContext`。
+实际状态：
 
-## 4. 页面解析
+```text
+unactivated -> parsing -> ready | partial | failed
+ready | partial -> answering -> ready | partial
+```
 
-解析优先级：
+`focus` 是下一问的临时引用。成功回答后清除；失败时保留以便重试。用户消息中的 `reference` 是发送瞬间的不可变快照。
+
+### 文章结构
+
+`ArticleDocument` 包含：
+
+- `blocks`：heading / paragraph / code / list / quote
+- `images`
+- 可选 `tables`
+- 可选 `formulas`
+- `isPartial`
+- 可选 `diagnostics`
+
+旧 session 可能缺少表格、公式、标题层级或媒体位置；新增字段必须保持可选或提供回退。
+
+## 4. 关键数据流
+
+### 4.1 激活与解析
+
+1. 工具栏点击发送 `assistant:open`。
+2. 悬浮助手立即打开并调用 `context:activate`。
+3. Background 写入 `parsing`，再请求 Content Script 执行 `extractArticle`。
+4. 提交结果前重新校验 generation 和标签页 URL。
+5. 根据 `article.isPartial` 写入 `ready` 或 `partial`。
+
+页面刷新不自动重解析。用户再次点击工具栏才刷新正文；学习记录的“继续提问”是另一个明确授权入口。
+
+### 4.2 正文提取
+
+根节点优先级：
 
 ```text
 article -> main -> [role="main"] -> body
 ```
 
-同一级存在多个候选容器时，比较过滤导航、表单、加载占位等噪声后的可读文本量，选择内容最丰富的候选项，避免摘要卡片或推荐条目抢占正文入口。
+- 同级候选按过滤噪声后的可读文本量选择。
+- 语义节点不足、命中特定长文容器或存在大量未捕获文字时，补采 `div/span/strong/b` 叶子文本。
+- 保留代码换行、`br`、列表边界和 `h2+` 多级章节路径。
+- 表格转为单元格结构；MathML 经过白名单净化；图片/SVG/Canvas 记录插入位置。
+- 加载态或可读内容不足 80 字时标记 `partial`。
 
-提取内容：
+不要直接保存或渲染任意原站 HTML。
 
-- `h1` 至 `h6`
-- `p`
-- `pre`
-- `blockquote`
-- `ul` / `ol`
-- `img`、语义化 SVG 图表和 Canvas 图表
-- `table` 的 caption、行、表头、单元格与跨行跨列信息
-- KaTeX/MathML 公式的 TeX annotation 和白名单 MathML
+### 4.3 问答上下文
 
-媒体项记录其前方已接受正文块数量，工作台据此将图片和图表穿插回原文位置。没有位置字段的旧会话按所属章节末尾回退显示。
-表格与公式同样记录正文插入位置。MathML 只保留数学元素和必要属性，移除脚本、事件处理器和外链内容。
-正文块同时保留从 `h2` 开始的标题层级路径，例如 `Test > Give Claude a feedback loop > Governance considerations`。重复的小节标题因此仍能区分所属模块；原网页和工作台划词都使用选区文档起点计算该路径。
+1. `articleContentBlocks` 将正文、图片说明、表格和公式合成有序块。
+2. `createArticleChunks` 按章节和 1,800 字符切片。
+3. `selectArticleContext` 选择请求模式：
+   - 普通问题：最多 6 个词项相关片段。
+   - 显式引用：章节路径精确优先，仅取锚点及同一上级小节邻近片段，最多 3 个。
+   - 全文型问题：64,000 字符内发送全部；超限时均匀选取首、中、尾。
+4. 新显式引用不携带旧问答，防止历史错误回答覆盖当前引用。
+5. 无新引用时，`selectConversationHistory` 负责长期对话记忆。
+6. `buildModelRequest` 将 system policy 与不受信任的网页资料分离。
+7. Background 在请求前写入用户消息，成功后写入回答并消费 focus。
 
-当上述语义节点不足 80 个字符、命中已知自定义正文容器，或根节点仍有至少 80 个字符未被语义节点覆盖时，执行安全补采：
+全文型意图和普通相关性目前都是本地词法规则，不是 embedding 或额外模型调用。
 
-- 优先读取 `data-testid="longformContent"`、`articleText`、`tweetText` 等明确正文容器，支持 X Article/长帖。
-- 其他 React 页面选择带直接文本、且没有更细文本子块的 `div/span/strong/b` 叶子容器，以保留自定义键值布局中的标签。
-- 排除按钮、toolbar、group、导航、表单、隐藏区域和加载占位。
-- 按文本去重，避免多层 React 包装重复收录整篇正文。
-- 补采内容按 DOM 顺序与已识别的标题、段落和代码块合并，不会因为前半段超过阈值而遗漏后续自定义正文。
+### 4.4 对话记忆
 
-过滤内容：
+- 历史不超过 48,000 字符时完整发送。
+- 超限后保留最近 6 轮，最多 24,000 字符。
+- 剩余预算从更早历史中召回最多 6 轮相关问答。
+- 只使用成功的完整问答对；裁剪只影响请求，不修改归档原文。
+- 任何请求只使用同一规范化 URL 的历史。
 
-- `nav`
-- `footer`
-- `aside`
-- `form`
-- `[role="navigation"]`
-- `[aria-hidden="true"]`
+### 4.5 图片与截图
 
-提取到的正文、表格和公式可读文字总长度小于 80 个字符，或解析时页面仍存在加载态信号时标记为 `PARTIAL`。这表示提取器没有获得稳定的完整正文，不一定意味着原页面本身很短。
+- 本地图片：JPEG/PNG/GIF/WebP，最大 5 MB，读为 data URL。
+- 页面图片和区域：调用 `captureVisibleTab`，按 `visualViewport` 映射裁剪，最长边收敛到 1,600px。
+- 截图前后校验活动标签页未变化。
+- 页面截图只覆盖当前可见视口。
+- 图片引用只用于当前一问；长期归档移除 `imageUrl`，只留类型、章节和说明。
 
-每次提取同时记录不含正文的诊断指标：
-
-- 选中的正文根节点类型。
-- 可读字符数与完整读取阈值。
-- 候选、接受、过滤和空内容块数量。
-- 页面中的多个 `article`、iframe、Canvas、表格和 Shadow DOM 信号。
-- 页面是否仍存在加载态标记。
-
-`PARTIAL` 状态提供三级排查入口：对话页轻量入口、诊断概览、单项原因详情。诊断页可以返回对话或显式重新理解页面，不会自动发送模型请求。
-
-工作台不复制原网页 DOM，也不执行原网页脚本。它只渲染提取后的标题、正文块、代码块、图片、表格和公式，因此跨站稳定，但动态表格、Canvas 和站点交互不会完整还原。提取阶段为代码块保留原始换行和缩进，并保留正文中的显式换行与列表项边界。
-
-## 5. 检索与模型请求
-
-### 片段构建
-
-- 按章节和最大字符数切分文章。
-- 标题与正文保留在同一章节片段中。
-- 不生成向用户展示的原文出处信息。
-
-### 相关性排序
-
-未引用具体内容时，当前 MVP 使用本地轻量检索：
-
-- 问题词重合权重：70%
-- 支持英文词和中文双字片段
-
-引用文字、图片或区域时，先结合引用文本与多级章节路径确定唯一锚点，再在同一章节或同一上级小节内按“锚点、后一片段、前一片段”的顺序提供局部上下文。此时不会为了填满片段上限而召回其他章节中名称相似的模块。
-显式引用代表本轮重新锚定上下文，因此该次模型请求不携带之前的问答消息，避免历史回答覆盖当前引用；引用在回答完成后仍按既有逻辑消费，下一轮无引用追问恢复正常会话记忆。
-
-普通具体问题默认选择 6 个相关片段。识别到“总结全文”“梳理整篇文章”“overview of the whole document”等全文型问题时，改为按原文顺序提供当前已解析到的全文；正文、表格单元格、公式 TeX 和图片文字说明使用同一条内容链路。全文上下文预算为 64,000 字符，超出预算时从首、中、尾按位置均匀选取片段，并明确告知模型不能声称覆盖所有细节。
-
-模型确定后，可以在不改变上层接口的前提下替换为向量或混合检索。
-
-### 对话长期记忆
-
-- 每个规范化 URL 保留完整的长期问答记录。
-- 无显式引用的连续追问才复用历史；新引用问题只使用当前引用与对应文章片段。
-- 历史总量不超过 48,000 字符时，完整加入模型请求。
-- 超过预算时，最近 6 轮最多使用 24,000 字符，其余预算从全部旧问答中召回最多 6 轮相关内容。
-- 旧问答复用本地词项重合检索，不产生额外模型调用；最终按原始时间顺序发送。
-- 未回答问题和错误消息不会进入长期记忆；超长内容只在请求构建时截断，不修改归档原文。
-
-### 回答约束
-
-系统提示词要求：
-
-- 优先依据当前文章语境。
-- 文章不足时才使用通用知识补充。
-- 不展示原文出处、段落编号、引用卡片或跳转位置。
-- 信息不足时明确说明，不将推断写成文章结论。
-
-## 6. 模型接口
-
-实现侧通过以下公开构建变量固定文本与视觉模型：
-
-```text
-VITE_MODEL_API_URL
-VITE_MODEL_ID
-```
-
-用户设置只包含 DeepSeek API Key。文字与图片请求统一使用 OpenAI-compatible Chat Completions：
-
-```json
-{
-  "model": "<DeepSeek model>",
-  "messages": [],
-  "stream": false
-}
-```
-
-模型固定为 `deepseek-v4-flash-vision-exp`。图片使用 DeepSeek 原生支持的 `image_url` 内容块，可承载当前截图生成的 JPEG/PNG data URL；纯文本沿用字符串内容。固定策略放在 system 消息中，不受信任的网页资料放在 user 消息中。请求默认 45 秒超时；模型未配置、API Key 缺失、超时、网络错误、HTTP 错误和无效响应均转化为明确的产品错误。
-
-## 7. 存储
+## 5. 存储
 
 ### `browser.storage.session`
 
-保存：
-
-- 页面状态
-- 解析后的正文块
-- 当前选择内容
-- 当前页面消息
-
-浏览器会话结束后自动失效，标签页关闭时主动按 `tabId` 删除。
+- 键：`context-reader:context:{tabId}:{normalizedUrl}`
+- 保存完整 `PageContext`，包括正文、focus 和临时对话。
+- 标签页关闭时按 `tabId` 删除全部上下文。
 
 ### `browser.storage.local`
 
-保存：
+- `context-reader:settings`：API Key、`retainConversations`
+- `context-reader:conversation:{normalizedUrl}`：V2 问答归档
+- 归档按 URL 串行写入，按问题 ID 合并完整问答对。
+- V1 数据读取时兼容，下一次写入升级。
+- 代码按 10 MB 配额显示使用量和 80% 警告，不自动删除旧记录。
 
-- DeepSeek API Key
-- 学习记录保存开关，默认关闭
-- 用户主动选择保留的完整问答文本
+删除归档时必须同步清理匹配 session 中的消息，避免关闭标签页后重新写回。
 
-学习记录使用 `context-reader:conversation:{normalizedUrl}` 独立存储：
+## 6. 模型接口
 
-- V2 记录包含 `schemaVersion`、规范化 URL、标题、完整消息、创建时间和更新时间。
-- V1 记录在读取时兼容，并在下一次写入时升级。
-- 同 URL 写入在 Background 内串行执行，按消息 ID 合并去重。
-- 达到本地存储容量的 80% 时提示用户；写入失败不会删除旧记录。
+构建变量：
 
-不保存：
+```text
+VITE_MODEL_API_URL=https://api.deepseek.com/chat/completions
+VITE_MODEL_ID=deepseek-v4-flash-vision-exp
+```
 
-- 文章全文
-- 模型请求完整上下文
+- 用户只提供一个 DeepSeek API Key。
+- OpenAI-compatible Chat Completions，`stream: false`。
+- 文字使用字符串；图片使用 `image_url`。
+- 统一 45 秒 `AbortController` 超时。
+- UI 的逐字效果是完整响应后的客户端动画，不是真正 SSE。
+- `AnswerModel = 'deepseek' | 'doubao'` 中的 Doubao 只用于旧归档展示。
 
-## 8. 安全边界
+不要把 API Key 放入 `.env`、源码、测试、日志或模型消息。
 
-- Content Script 无权读取 API Key。
-- 两个 API Key 都不进入 DOM、普通日志、模型消息和对话归档。
-- 模型请求只从 Background 发出。
-- 页面理解只由用户点击工具栏图标或“继续提问”等明确操作触发，并且只发生在浏览器本地。
-- 用户发送问题后才调用模型 API；Content Script 只能获得“是否已配置 Key”的布尔状态。
-- 停止理解只清除临时页面上下文，不删除本地学习记录。
-- 删除学习记录必须由用户在历史页或设置页显式确认。
+## 7. 安全不变量
 
-## 9. 验证策略
+后续改动必须保持：
 
-- Core：URL、解析、检索、上下文状态和模型请求单元测试。
-- Runtime：session/local 存储与模型错误边界测试。
-- UI：休眠默认态、显式启用、状态面板、选词展开、窗口缩放、浏览器缩放回收、发送问题、Esc 收起和设置保存组件测试。
-- Workbench：目标上下文隔离、双栏调整、文章渲染、划词/点图/框选引用和连续追问组件测试。
-- Build：Chrome MV3 和 Edge MV3 双构建。
-- Manual：解压扩展加载、休眠页面不读取、工具栏显式启动、状态切换、选中文字、窗口缩放与悬浮卡片问答。
+- 页面默认休眠；不允许页面脚本主动启动插件。
+- Content Script 不得读取 API Key。
+- Background 是唯一模型调用方。
+- 网页标题、URL、正文一律按不受信任数据处理。
+- Markdown 禁止原始 HTML 和远程图片；外链新标签打开。
+- MathML 只允许白名单元素和属性。
+- 截图必须由用户显式触发，并校验来源标签页。
+- `host_permissions: ['<all_urls>']` 不得移除；这是扩展工作台截图的 API 要求。
+- 清除、停用、跳转或并发请求后，过期异步结果不得回写。
+
+## 8. 模块导航
+
+| 模块 | 主要职责 |
+| --- | --- |
+| `src/core/article-extractor.ts` | DOM 解析、结构恢复、诊断 |
+| `src/core/retrieval.ts` | 文章切片、引用锚定、全文模式 |
+| `src/core/model-request.ts` | 提示词和模型消息 |
+| `src/core/conversation-memory.ts` | 长对话预算与召回 |
+| `src/runtime/context-repository.ts` | session 上下文、local 归档 |
+| `src/runtime/model-client.ts` | DeepSeek 请求、超时和错误 |
+| `entrypoints/background.ts` | 全局编排与生命周期 |
+| `entrypoints/content.ts` | 网页注入、解析、截图和快捷交互 |
+| `FloatingAssistant.tsx` | 网页悬浮交互 |
+| `StudyWorkspace.tsx` | 双栏阅读工作台 |
+| `HistoryLibrary.tsx` | 学习记录 |
+
+`background.ts`、`content.ts`、`FloatingAssistant.tsx`、`StudyWorkspace.tsx` 和 `article-extractor.ts` 都较大。优先抽离可单测的纯逻辑；不要同时重写状态机和 UI。
+
+## 9. 已知技术债与历史兼容
+
+- 默认模型是 DeepSeek 实验视觉型号，需关注官方替代型号和接口变更。
+- 全文意图识别与文章召回依赖关键词，存在漏判和语义召回不足。
+- 页面提取是启发式 DOM 解析，虚拟列表、iframe、Shadow DOM、PDF 和异步未加载内容可能不完整。
+- 学习记录仍使用 `storage.local`，容量继续增长时应评估 IndexedDB 迁移。
+- 没有真实 token 流式协议。
+- 缺少稳定的跨站 E2E 测试；当前主要依赖组件测试、构建检查和手工加载扩展。
+- 旧 Doubao 消息、V1 归档和缺失结构字段必须继续可读；不要因“清理死代码”直接删除兼容类型。
+
+已修复但值得保留为回归经验：
+
+- Content Script 原生 `fetch` 必须通过箭头函数保持调用上下文。
+- 设置页只能由 Background 打开。
+- 扩展 Shadow host 必须使用标准 HTML 元素，避免 Reddit 的 `:not(:defined)` 隐藏。
+- 截图需要 `<all_urls>`，`activeTab` 不会跨到扩展工作台。
+- 历史回答不能在初始化、刷新或跨视图同步时重新播放逐字动画。
+- 明确引用必须优先于同名章节和旧回答。
+
+## 10. 开发与交付
+
+```bash
+pnpm install
+pnpm check
+```
+
+`pnpm check` 依次执行源码类型检查、测试类型检查、覆盖率测试和 Chrome/Edge 构建。当前覆盖率全局阈值均为 80%。
+
+构建目录：
+
+```text
+.output/chrome-mv3
+.output/edge-mv3
+```
+
+手工验收必须加载构建目录，不是仓库根目录；代码或 manifest 更新后，要在扩展管理页重新加载并刷新目标网页。
+
+完成任务前：
+
+1. 检查工作区，保留用户已有改动。
+2. 为行为回归补最小测试，风险越高覆盖越广。
+3. 运行 `pnpm check`；默认 shell 若是 Node 18，应切换到已有 Node 22，不要降低项目要求。
+4. 对真实网页问题记录 URL、DOM 特征和可复现证据。
+5. 更新本手册或产品基线中受影响的事实。
+6. 用户要求提交时，提交后必须显式 push，并比较本地、`origin/main` 和远端 SHA。
+
+## 11. 快速排障
+
+- **点击插件无 UI**：查 `[data-context-reader-ui="assistant-root"]`、Shadow Root、dialog、计算样式和 `:defined`；Reddit 曾因未注册宿主标签被隐藏。
+- **页面部分读取**：先看诊断中的 root、可读字符、候选块、加载态、未匹配文本和 iframe/Shadow DOM。
+- **回答串章节**：检查 focus 的多级 section、选中的 article chunks，以及请求是否误带旧历史。
+- **全文只答前半段**：检查是否识别为 `whole`、选择片段数和 `contextTruncated`。
+- **截图失败或错页**：检查 manifest `<all_urls>`、活动标签页和 `visualViewport` 坐标。
+- **模型一直等待**：检查 45 秒超时、HTTP 状态和 Background 错误；UI 没有真正 SSE。
+- **历史被删除后又出现**：检查 session 消息是否与 local 归档同时清理。
