@@ -162,6 +162,28 @@ function createBridge(
   };
 }
 
+function mockTextSelection(element: HTMLElement, text = 'Working memory') {
+  vi.spyOn(window, 'getSelection').mockReturnValue({
+    isCollapsed: false,
+    toString: () => text,
+    anchorNode: element.firstChild,
+    rangeCount: 1,
+    getRangeAt: () => ({
+      getBoundingClientRect: () => ({
+        left: 180,
+        top: 220,
+        right: 310,
+        bottom: 244,
+        width: 130,
+        height: 24,
+        x: 180,
+        y: 220,
+        toJSON: () => undefined,
+      }),
+    }),
+  } as unknown as Selection);
+}
+
 describe('StudyWorkspace', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -433,25 +455,7 @@ describe('StudyWorkspace', () => {
     const paragraph = await screen.findByText(
       'Working memory carries the current reasoning state.',
     );
-    vi.spyOn(window, 'getSelection').mockReturnValue({
-      isCollapsed: false,
-      toString: () => 'Working memory',
-      anchorNode: paragraph.firstChild,
-      rangeCount: 1,
-      getRangeAt: () => ({
-        getBoundingClientRect: () => ({
-          left: 180,
-          top: 220,
-          right: 310,
-          bottom: 244,
-          width: 130,
-          height: 24,
-          x: 180,
-          y: 220,
-          toJSON: () => undefined,
-        }),
-      }),
-    } as unknown as Selection);
+    mockTextSelection(paragraph);
 
     fireEvent.mouseUp(paragraph);
     await userEvent.click(
@@ -477,25 +481,7 @@ describe('StudyWorkspace', () => {
     const paragraph = await screen.findByText(
       'Working memory carries the current reasoning state.',
     );
-    vi.spyOn(window, 'getSelection').mockReturnValue({
-      isCollapsed: false,
-      toString: () => 'Working memory',
-      anchorNode: paragraph.firstChild,
-      rangeCount: 1,
-      getRangeAt: () => ({
-        getBoundingClientRect: () => ({
-          left: 180,
-          top: 220,
-          right: 310,
-          bottom: 244,
-          width: 130,
-          height: 24,
-          x: 180,
-          y: 220,
-          toJSON: () => undefined,
-        }),
-      }),
-    } as unknown as Selection);
+    mockTextSelection(paragraph);
 
     fireEvent.mouseUp(paragraph);
     expect(
@@ -561,6 +547,53 @@ describe('StudyWorkspace', () => {
 
     expect(translation).toHaveTextContent('工作记忆承载当前的推理状态。');
     expect(translation).toHaveStyle({ left: '380px', top: '400px' });
+
+    fireEvent(
+      document.body,
+      new MouseEvent('pointerdown', { bubbles: true }),
+    );
+    expect(
+      screen.queryByRole('status', { name: '划词译文' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not restore a dismissed translation after its request finishes', async () => {
+    let resolveTranslation: (value: string) => void = () => undefined;
+    const bridge = createBridge({
+      translate: vi.fn().mockReturnValue(
+        new Promise<string>((resolve) => {
+          resolveTranslation = resolve;
+        }),
+      ),
+    });
+    render(<StudyWorkspace bridge={bridge} />);
+    const paragraph = await screen.findByText(
+      'Working memory carries the current reasoning state.',
+    );
+    mockTextSelection(paragraph);
+
+    fireEvent.mouseUp(paragraph);
+    await userEvent.click(
+      await screen.findByRole('button', { name: '翻译选中文字' }),
+    );
+    expect(
+      screen.getByRole('status', { name: '划词译文' }),
+    ).toHaveTextContent('翻译中...');
+
+    fireEvent(
+      document.body,
+      new MouseEvent('pointerdown', { bubbles: true }),
+    );
+    expect(
+      screen.queryByRole('status', { name: '划词译文' }),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveTranslation('不应重新出现的译文');
+    });
+    expect(
+      screen.queryByRole('status', { name: '划词译文' }),
+    ).not.toBeInTheDocument();
   });
 
   it('provides an explicit point-image mode in the reader toolbar', async () => {

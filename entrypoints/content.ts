@@ -220,26 +220,29 @@ function installTextSelection(openAssistant: () => void): () => void {
     )
     .forEach((element) => element.remove());
   const toolbar = createSelectionToolbar();
-  const translation = createTranslationBubble();
+  let translation: HTMLDivElement | null = null;
+  let removeTranslationDrag: (() => void) | null = null;
   let selectedText = '';
   let selectedElement: Element | null = null;
   let selectedRect: DOMRect | null = null;
   let translationRequest = 0;
   let translationMoved = false;
   let enabled = false;
-  const removeTranslationDrag = makeDraggable(
-    translation,
-    () => {
-      translationMoved = true;
-    },
-  );
 
   const hideToolbar = () => {
     toolbar.element.style.display = 'none';
   };
   const hideTranslation = () => {
     translationRequest += 1;
-    translation.style.display = 'none';
+    document.removeEventListener(
+      'pointerdown',
+      onDocumentPointerDown,
+      true,
+    );
+    removeTranslationDrag?.();
+    removeTranslationDrag = null;
+    translation?.remove();
+    translation = null;
   };
   const showTranslation = (
     text: string,
@@ -247,6 +250,20 @@ function installTextSelection(openAssistant: () => void): () => void {
     failed = false,
     reposition = true,
   ) => {
+    if (!translation) {
+      translation = createTranslationBubble();
+      removeTranslationDrag = makeDraggable(
+        translation,
+        () => {
+          translationMoved = true;
+        },
+      );
+      document.addEventListener(
+        'pointerdown',
+        onDocumentPointerDown,
+        true,
+      );
+    }
     translation.textContent = text;
     translation.style.color = failed ? '#a33a22' : '#272925';
     translation.style.display = 'block';
@@ -286,6 +303,19 @@ function installTextSelection(openAssistant: () => void): () => void {
       return;
     }
     window.setTimeout(showForSelection, 0);
+  };
+  const onDocumentPointerDown = (event: PointerEvent) => {
+    if (
+      !translation ||
+      (event.target instanceof Node &&
+        translation.contains(event.target))
+    ) {
+      return;
+    }
+    hideTranslation();
+  };
+  const preserveSelection = (event: MouseEvent) => {
+    event.preventDefault();
   };
 
   const onButtonClick = async () => {
@@ -346,11 +376,10 @@ function installTextSelection(openAssistant: () => void): () => void {
   document.addEventListener('mouseup', onMouseUp);
   document.addEventListener('scroll', hideToolbar, true);
   const unsubscribeActive = subscribeAssistantActive(onActiveChange);
-  toolbar.askButton.addEventListener('mousedown', (event) =>
-    event.preventDefault(),
-  );
-  toolbar.translateButton.addEventListener('mousedown', (event) =>
-    event.preventDefault(),
+  toolbar.askButton.addEventListener('mousedown', preserveSelection);
+  toolbar.translateButton.addEventListener(
+    'mousedown',
+    preserveSelection,
   );
   toolbar.askButton.addEventListener('click', onButtonClick);
   toolbar.translateButton.addEventListener('click', onTranslateClick);
@@ -359,11 +388,18 @@ function installTextSelection(openAssistant: () => void): () => void {
     document.removeEventListener('mouseup', onMouseUp);
     document.removeEventListener('scroll', hideToolbar, true);
     unsubscribeActive();
+    toolbar.askButton.removeEventListener(
+      'mousedown',
+      preserveSelection,
+    );
+    toolbar.translateButton.removeEventListener(
+      'mousedown',
+      preserveSelection,
+    );
     toolbar.askButton.removeEventListener('click', onButtonClick);
     toolbar.translateButton.removeEventListener('click', onTranslateClick);
-    removeTranslationDrag();
+    hideTranslation();
     toolbar.element.remove();
-    translation.remove();
   };
 }
 

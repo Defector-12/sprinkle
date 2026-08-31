@@ -362,12 +362,37 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
   const regionDrag = useRef(false);
   const regionRef = useRef<RegionSelection | null>(null);
   const translationRequestRef = useRef(0);
+  const translationRef = useRef<HTMLElement>(null);
   const translationDragRef = useRef<{
     pointerId: number;
     offsetX: number;
     offsetY: number;
   } | null>(null);
+  const translationVisible = translation !== null;
   useAutoGrowTextarea(inputRef, question, isComposerMaximized, 92);
+
+  useEffect(() => {
+    if (!translationVisible) return;
+    const dismissTranslation = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        translationRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+      translationRequestRef.current += 1;
+      translationDragRef.current = null;
+      setTranslation(null);
+    };
+    document.addEventListener('pointerdown', dismissTranslation, true);
+    return () => {
+      document.removeEventListener(
+        'pointerdown',
+        dismissTranslation,
+        true,
+      );
+    };
+  }, [translationVisible]);
 
   useEffect(() => {
     let active = true;
@@ -911,6 +936,7 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
 
         {translation && (
           <aside
+            ref={translationRef}
             className={`study-translation${
               translation.failed ? ' study-translation--failed' : ''
             }`}
