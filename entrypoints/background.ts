@@ -10,6 +10,7 @@ import { createPageContext } from '../src/core/page-context.ts';
 import {
   articleContentBlocks,
   createArticleChunks,
+  DEFAULT_RELEVANT_CHUNK_LIMIT,
   selectArticleContext,
 } from '../src/core/retrieval.ts';
 import { createPageKey, normalizePageUrl } from '../src/core/url.ts';
@@ -267,7 +268,7 @@ async function performAskPage(
     question,
     focusText: current.focus?.text,
     focusSection: current.focus?.section,
-    limit: 6,
+    limit: DEFAULT_RELEVANT_CHUNK_LIMIT,
   });
   const request = buildModelRequest({
     article: current.article,

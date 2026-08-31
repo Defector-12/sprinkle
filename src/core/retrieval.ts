@@ -1,3 +1,5 @@
+import MiniSearch from 'minisearch';
+
 import type {
   ArticleBlock,
   ArticleChunk,
@@ -5,6 +7,61 @@ import type {
 } from './types.ts';
 
 export const WHOLE_ARTICLE_CHARACTER_BUDGET = 64_000;
+export const RELEVANT_CONTEXT_CHARACTER_BUDGET = 24_000;
+export const DEFAULT_RELEVANT_CHUNK_LIMIT = 8;
+const RETRIEVAL_CHILD_CHARACTER_LIMIT = 900;
+const RETRIEVAL_CANDIDATE_LIMIT = 20;
+const RETRIEVAL_WINDOW_RADIUS = 1;
+
+const RETRIEVAL_STOP_WORDS = new Set([
+  'an',
+  'and',
+  'about',
+  'are',
+  'as',
+  'at',
+  'be',
+  'by',
+  'can',
+  'did',
+  'do',
+  'does',
+  'explain',
+  'for',
+  'from',
+  'has',
+  'have',
+  'how',
+  'in',
+  'into',
+  'is',
+  'it',
+  'of',
+  'on',
+  'or',
+  'should',
+  'that',
+  'the',
+  'this',
+  'to',
+  'use',
+  'was',
+  'were',
+  'what',
+  'when',
+  'where',
+  'which',
+  'why',
+  'will',
+  'with',
+  '为什么',
+  '什么',
+  '哪些',
+  '如何',
+  '怎么',
+  '这个',
+  '这篇',
+]);
 
 export type ArticleContextMode = 'relevant' | 'whole';
 
@@ -111,7 +168,7 @@ export function articleContentBlocks(
 
 export function createArticleChunks(
   blocks: ArticleBlock[],
-  maxCharacters = 1_800,
+  maxCharacters = RETRIEVAL_CHILD_CHARACTER_LIMIT,
 ): ArticleChunk[] {
   const characterLimit = Math.max(1, Math.floor(maxCharacters));
   const chunks: ArticleChunk[] = [];
@@ -191,6 +248,7 @@ export interface RetrievalQuery {
   focusText?: string;
   focusSection?: string;
   limit?: number;
+  characterBudget?: number;
 }
 
 export function isWholeArticleQuestion(question: string): boolean {
@@ -217,10 +275,9 @@ export function retrieveRelevantChunks(
   chunks: ArticleChunk[],
   query: RetrievalQuery,
 ): ArticleChunk[] {
-  const questionTokens = tokensFor(query.question);
   const focusTokens = tokensFor(query.focusText ?? '');
   const focusSectionTokens = tokensFor(query.focusSection ?? '');
-  const limit = Math.max(1, query.limit ?? 5);
+  const limit = Math.max(1, query.limit ?? DEFAULT_RELEVANT_CHUNK_LIMIT);
   const normalizedFocus = (query.focusText ?? '')
     .toLowerCase()
     .replace(/\s+/g, ' ')
@@ -229,53 +286,45 @@ export function retrieveRelevantChunks(
     .toLowerCase()
     .trim();
 
-  const scored = chunks.map((chunk, index) => {
-    const combined = `${chunk.section}\n${chunk.text}`;
-    const questionScore = overlapScore(questionTokens, combined);
-    const focusScore = overlapScore(focusTokens, combined);
-    const focusSectionScore = overlapScore(
-      focusSectionTokens,
-      chunk.section,
-    );
-    const exactSectionBonus = query.question
-      .toLowerCase()
-      .includes(chunk.section.toLowerCase())
-      ? 0.15
-      : 0;
-    const normalizedCombined = combined
-      .toLowerCase()
-      .replace(/\s+/g, ' ');
-    const exactFocusBonus =
-      normalizedFocus && normalizedCombined.includes(normalizedFocus)
-        ? 0.5
-        : 0;
-    const exactFocusSectionBonus =
-      normalizedFocusSection &&
-      chunk.section.toLowerCase() === normalizedFocusSection
-        ? 0.5
-        : 0;
-
-    return {
-      chunk,
-      index,
-      focusAnchorScore:
-        focusScore +
-        focusSectionScore * 0.5 +
-        exactFocusBonus +
-        exactFocusSectionBonus,
-      score: questionScore * 0.7 + focusScore * 0.3 + exactSectionBonus,
-    };
-  });
-
   if (focusTokens.size || focusSectionTokens.size) {
+    const focusedChunks = chunks.map((chunk, index) => {
+      const combined = `${chunk.section}\n${chunk.text}`;
+      const focusScore = overlapScore(focusTokens, combined);
+      const focusSectionScore = overlapScore(
+        focusSectionTokens,
+        chunk.section,
+      );
+      const normalizedCombined = combined
+        .toLowerCase()
+        .replace(/\s+/g, ' ');
+      const exactFocusBonus =
+        normalizedFocus && normalizedCombined.includes(normalizedFocus)
+          ? 0.5
+          : 0;
+      const exactFocusSectionBonus =
+        normalizedFocusSection &&
+        chunk.section.toLowerCase() === normalizedFocusSection
+          ? 0.5
+          : 0;
+
+      return {
+        chunk,
+        index,
+        focusAnchorScore:
+          focusScore +
+          focusSectionScore * 0.5 +
+          exactFocusBonus +
+          exactFocusSectionBonus,
+      };
+    });
     const exactSectionCandidates = normalizedFocusSection
-      ? scored.filter(
+      ? focusedChunks.filter(
           ({ chunk }) =>
             chunk.section.toLowerCase() === normalizedFocusSection,
         )
       : [];
     const anchor = (
-      exactSectionCandidates.length ? exactSectionCandidates : scored
+      exactSectionCandidates.length ? exactSectionCandidates : focusedChunks
     ).toSorted(
       (left, right) =>
         right.focusAnchorScore - left.focusAnchorScore ||
@@ -309,10 +358,144 @@ export function retrieveRelevantChunks(
     }
   }
 
-  return scored
-    .sort((left, right) => right.score - left.score || left.index - right.index)
-    .slice(0, limit)
-    .map(({ chunk }) => chunk);
+  return retrieveBm25Windows(chunks, query.question, {
+    limit,
+    characterBudget:
+      query.characterBudget ?? RELEVANT_CONTEXT_CHARACTER_BUDGET,
+  });
+}
+
+function retrievalTerms(value: string): string[] {
+  const normalized = value.toLowerCase();
+  const terms =
+    normalized
+      .match(/[a-z0-9_]+/g)
+      ?.filter((term) => term.length >= 2 && !RETRIEVAL_STOP_WORDS.has(term)) ??
+    [];
+
+  for (const match of normalized.matchAll(/[\u3400-\u9fff]+/g)) {
+    const text = match[0];
+    if (text.length === 1) terms.push(text);
+    for (let index = 0; index < text.length - 1; index += 1) {
+      const term = text.slice(index, index + 2);
+      if (!RETRIEVAL_STOP_WORDS.has(term)) terms.push(term);
+    }
+  }
+
+  return terms;
+}
+
+interface SearchableChunk {
+  id: string;
+  index: number;
+  section: string;
+  text: string;
+}
+
+function buildChunkSearch(chunks: ArticleChunk[]): MiniSearch<SearchableChunk> {
+  const search = new MiniSearch<SearchableChunk>({
+    fields: ['section', 'text'],
+    idField: 'id',
+    storeFields: ['index'],
+    tokenize: retrievalTerms,
+    processTerm: (term) => term,
+    searchOptions: {
+      boost: { section: 3, text: 1 },
+      combineWith: 'OR',
+      prefix: false,
+      fuzzy: false,
+    },
+  });
+  search.addAll(
+    chunks.map((chunk, index) => ({
+      id: chunk.id,
+      index,
+      section: chunk.section,
+      text: chunk.text,
+    })),
+  );
+  return search;
+}
+
+function evidenceWindow(
+  chunks: ArticleChunk[],
+  anchorIndex: number,
+  characterBudget: number,
+  coveredIndexes: ReadonlySet<number>,
+): { chunk: ArticleChunk; indexes: number[] } | null {
+  const anchor = chunks[anchorIndex];
+  if (!anchor || chunkCharacterLength(anchor) > characterBudget) return null;
+
+  const indexes = [anchorIndex];
+  let length = chunkCharacterLength(anchor);
+  for (let distance = 1; distance <= RETRIEVAL_WINDOW_RADIUS; distance += 1) {
+    for (const index of [anchorIndex - distance, anchorIndex + distance]) {
+      const neighbor = chunks[index];
+      if (
+        !neighbor ||
+        coveredIndexes.has(index) ||
+        neighbor.section !== anchor.section
+      ) {
+        continue;
+      }
+      const addedLength = neighbor.text.length + 1;
+      if (length + addedLength > characterBudget) continue;
+      indexes.push(index);
+      length += addedLength;
+    }
+  }
+
+  indexes.sort((left, right) => left - right);
+  const selected = indexes.map((index) => chunks[index] as ArticleChunk);
+  return {
+    chunk: {
+      id: `window-${selected[0]?.id}-${selected.at(-1)?.id}`,
+      section: anchor.section,
+      text: selected.map((chunk) => chunk.text).join('\n'),
+      blockIds: [...new Set(selected.flatMap((chunk) => chunk.blockIds))],
+    },
+    indexes,
+  };
+}
+
+function retrieveBm25Windows(
+  chunks: ArticleChunk[],
+  question: string,
+  options: { limit: number; characterBudget: number },
+): ArticleChunk[] {
+  const queryTerms = new Set(retrievalTerms(question));
+  if (!chunks.length || !queryTerms.size) return [];
+
+  const minimumTermMatches = queryTerms.size >= 3 ? 2 : 1;
+  const candidates = buildChunkSearch(chunks)
+    .search(question)
+    .filter((result) => result.terms.length >= minimumTermMatches)
+    .slice(0, Math.max(RETRIEVAL_CANDIDATE_LIMIT, options.limit * 3));
+  const selected: ArticleChunk[] = [];
+  const coveredIndexes = new Set<number>();
+  let usedCharacters = 0;
+
+  for (const candidate of candidates) {
+    if (selected.length >= options.limit) break;
+    const index = Number(candidate.index);
+    if (!Number.isInteger(index) || coveredIndexes.has(index)) continue;
+
+    const remainingBudget = options.characterBudget - usedCharacters;
+    const window = evidenceWindow(
+      chunks,
+      index,
+      remainingBudget,
+      coveredIndexes,
+    );
+    if (!window) continue;
+    selected.push(window.chunk);
+    usedCharacters += chunkCharacterLength(window.chunk);
+    for (const coveredIndex of window.indexes) {
+      coveredIndexes.add(coveredIndex);
+    }
+  }
+
+  return selected;
 }
 
 function chunkCharacterLength(chunk: ArticleChunk): number {

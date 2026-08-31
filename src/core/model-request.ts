@@ -19,25 +19,11 @@ export interface BuildModelRequestInput {
 }
 
 function articleContext(
-  article: ArticleDocument,
   chunks: ArticleChunk[],
 ): string {
-  const selectedChunks =
-    chunks.length > 0
-      ? chunks
-      : [
-          {
-            id: 'article-fallback',
-            section: article.title,
-            text: article.blocks
-              .slice(0, 8)
-              .map((block) => block.text)
-              .join('\n'),
-            blockIds: [],
-          },
-        ];
+  if (!chunks.length) return '未找到与当前问题直接相关的文章证据。';
 
-  return selectedChunks
+  return chunks
     .map((chunk) => `[${chunk.section}]\n${chunk.text}`)
     .join('\n\n');
 }
@@ -94,6 +80,9 @@ export function buildModelRequest(
     input.contextTruncated
       ? '文章超过单次请求预算，本次仅提供按全文位置均匀选取的内容；回答时必须明确无法覆盖所有细节。'
       : '',
+    contextMode === 'relevant' && input.relevantChunks.length === 0
+      ? '未找到与当前问题直接相关的文章证据。回答时必须明确说明，并且不得将通用知识表述为文章观点。'
+      : '',
   ].filter(Boolean);
   const systemMessage = [
     '你是一个技术文章阅读助手。',
@@ -110,7 +99,7 @@ export function buildModelRequest(
     contextMode === 'whole'
       ? '当前已解析到的文章全文：'
       : '与问题相关的文章内容：',
-    articleContext(input.article, input.relevantChunks),
+    articleContext(input.relevantChunks),
   ].join('\n');
 
   const history = input.focus

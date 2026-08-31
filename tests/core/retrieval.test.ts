@@ -160,6 +160,118 @@ describe('article retrieval', () => {
     expect(results[0]?.text).toContain('vector database');
   });
 
+  it('uses BM25 to prioritize distinctive terms over repeated generic words', () => {
+    const chunks: ArticleChunk[] = [
+      {
+        id: 'generic',
+        section: 'Background',
+        text: 'The model uses a model component for model processing.',
+        blockIds: ['generic'],
+      },
+      {
+        id: 'fusion',
+        section: 'Retrieval',
+        text: 'Reciprocal rank fusion combines independently ranked result lists.',
+        blockIds: ['fusion'],
+      },
+    ];
+
+    const results = retrieveRelevantChunks(chunks, {
+      question: 'How does reciprocal rank fusion combine results?',
+      limit: 1,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.text).toContain('Reciprocal rank fusion');
+  });
+
+  it('returns the matching child with neighboring context from the same section', () => {
+    const chunks: ArticleChunk[] = [
+      {
+        id: 'method-setup',
+        section: 'Method > Calibration',
+        text: 'The calibration set contains held-out predictions.',
+        blockIds: ['method-setup'],
+      },
+      {
+        id: 'method-threshold',
+        section: 'Method > Calibration',
+        text: 'A conformal threshold controls the target error rate.',
+        blockIds: ['method-threshold'],
+      },
+      {
+        id: 'method-result',
+        section: 'Method > Calibration',
+        text: 'Coverage is then measured on the evaluation split.',
+        blockIds: ['method-result'],
+      },
+      {
+        id: 'limitations',
+        section: 'Limitations',
+        text: 'The method assumes exchangeable samples.',
+        blockIds: ['limitations'],
+      },
+    ];
+
+    const results = retrieveRelevantChunks(chunks, {
+      question: 'How does the conformal threshold control error?',
+      limit: 1,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.text).toContain('calibration set');
+    expect(results[0]?.text).toContain('conformal threshold');
+    expect(results[0]?.text).toContain('Coverage is then measured');
+    expect(results[0]?.text).not.toContain('exchangeable samples');
+  });
+
+  it('stops adding evidence windows when the relevant-context budget is full', () => {
+    const chunks: ArticleChunk[] = [
+      {
+        id: 'alpha',
+        section: 'Alpha',
+        text: `evidence alpha ${'a'.repeat(170)}`,
+        blockIds: ['alpha'],
+      },
+      {
+        id: 'beta',
+        section: 'Beta',
+        text: `evidence beta ${'b'.repeat(170)}`,
+        blockIds: ['beta'],
+      },
+      {
+        id: 'gamma',
+        section: 'Gamma',
+        text: `evidence gamma ${'c'.repeat(170)}`,
+        blockIds: ['gamma'],
+      },
+    ];
+
+    const results = retrieveRelevantChunks(chunks, {
+      question: 'evidence alpha beta gamma',
+      limit: 3,
+      characterBudget: 400,
+    });
+    const selectedLength = results.reduce(
+      (total, chunk) => total + chunk.section.length + chunk.text.length + 3,
+      0,
+    );
+
+    expect(results).toHaveLength(2);
+    expect(selectedLength).toBeLessThanOrEqual(400);
+  });
+
+  it('returns no evidence when no meaningful query term matches', () => {
+    const chunks = createArticleChunks(blocks, 180);
+
+    expect(
+      retrieveRelevantChunks(chunks, {
+        question: 'How are mitochondrial ribosomes assembled?',
+        limit: 6,
+      }),
+    ).toEqual([]);
+  });
+
   it('keeps a focused question near its document anchor instead of recalling similarly named sections', () => {
     const chunks: ArticleChunk[] = [
       {

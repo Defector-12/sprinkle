@@ -92,6 +92,22 @@ describe('buildModelRequest', () => {
     ]);
   });
 
+  it('does not substitute the beginning of the article when retrieval finds no evidence', () => {
+    const request = buildModelRequest({
+      article,
+      question: 'How are mitochondrial ribosomes assembled?',
+      relevantChunks: [],
+      history: [],
+      focus: null,
+    });
+    const serialized = JSON.stringify(request.messages);
+
+    expect(serialized).toContain('未找到与当前问题直接相关的文章证据');
+    expect(serialized).not.toContain(
+      'Short-term memory keeps the current task state.',
+    );
+  });
+
   it('does not carry previous answers into a newly focused question', () => {
     const history: ChatMessage[] = [
       {

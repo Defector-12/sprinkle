@@ -139,17 +139,18 @@ article -> main -> [role="main"] -> body
 ### 4.3 问答上下文
 
 1. `articleContentBlocks` 将正文、图片说明、表格和公式合成有序块。
-2. `createArticleChunks` 按章节和 1,800 字符切片。
+2. `createArticleChunks` 按章节生成不超过 900 字符的检索子片段。
 3. `selectArticleContext` 选择请求模式：
-   - 普通问题：最多 6 个词项相关片段。
+   - 普通问题：使用 MiniSearch BM25 对章节路径和正文进行加权召回，候选必须命中足够的有效词项；命中子片段后扩展同章节前后邻近片段，在 24,000 字符预算内最多返回 8 个证据窗口。
    - 显式引用：章节路径精确优先，仅取锚点及同一上级小节邻近片段，最多 3 个。
    - 全文型问题：64,000 字符内发送全部；超限时均匀选取首、中、尾。
-4. 新显式引用不携带旧问答，防止历史错误回答覆盖当前引用。
-5. 无新引用时，`selectConversationHistory` 负责长期对话记忆。
-6. `buildModelRequest` 将 system policy 与不受信任的网页资料分离。
-7. Background 在请求前写入用户消息，成功后写入回答并消费 focus。
+4. 普通问题没有可靠命中时不回退到文章开头；模型请求会明确声明未找到直接证据。
+5. 新显式引用不携带旧问答，防止历史错误回答覆盖当前引用。
+6. 无新引用时，`selectConversationHistory` 负责长期对话记忆。
+7. `buildModelRequest` 将 system policy 与不受信任的网页资料分离。
+8. Background 在请求前写入用户消息，成功后写入回答并消费 focus。
 
-全文型意图和普通相关性目前都是本地词法规则，不是 embedding 或额外模型调用。
+全文型意图和普通相关性目前都在本地完成；BM25 能改善术语权重和长度归一化，但仍不是 embedding 或额外模型调用。
 
 ### 4.4 对话记忆
 
@@ -238,7 +239,7 @@ VITE_MODEL_ID=deepseek-v4-flash-vision-exp
 ## 9. 已知技术债与历史兼容
 
 - 默认模型是 DeepSeek 实验视觉型号，需关注官方替代型号和接口变更。
-- 全文意图识别与文章召回依赖关键词，存在漏判和语义召回不足。
+- 全文意图识别仍依赖关键词；BM25 召回不理解同义表达，仍存在语义召回不足。
 - 页面提取是启发式 DOM 解析，虚拟列表、iframe、Shadow DOM、PDF 和异步未加载内容可能不完整。
 - 学习记录仍使用 `storage.local`，容量继续增长时应评估 IndexedDB 迁移。
 - 没有真实 token 流式协议。
