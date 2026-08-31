@@ -2,6 +2,7 @@ import {
   ArrowUp,
   ExternalLink,
   Image as ImageIcon,
+  Languages,
   LibraryBig,
   LoaderCircle,
   Maximize2,
@@ -49,6 +50,7 @@ import { useStreamedAnswer } from './use-streamed-answer.ts';
 export interface StudyWorkspaceBridgeContract {
   initialize(): Promise<PageContext>;
   ask(question: string): Promise<PageContext>;
+  translate(text: string, section: string): Promise<string>;
   setTextFocus(text: string, section: string): Promise<PageContext>;
   setImageFocus(focus: ImageFocus): Promise<PageContext>;
   setRegionFocus(focus: RegionFocus): Promise<PageContext>;
@@ -81,6 +83,13 @@ interface SelectionAction {
   quote: TextQuote;
   left: number;
   top: number;
+}
+
+interface TranslationResult {
+  text: string;
+  left: number;
+  top: number;
+  failed: boolean;
 }
 
 const MIN_READER_WIDTH = 30;
@@ -324,6 +333,8 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
   const [selectedQuote, setSelectedQuote] = useState<TextQuote | null>(null);
   const [selectionAction, setSelectionAction] =
     useState<SelectionAction | null>(null);
+  const [translation, setTranslation] =
+    useState<TranslationResult | null>(null);
   const [imagePickMode, setImagePickMode] = useState(false);
   const [question, setQuestion] = useState('');
   const [isComposerMaximized, setIsComposerMaximized] = useState(false);
@@ -350,6 +361,12 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
   const dividerDrag = useRef(false);
   const regionDrag = useRef(false);
   const regionRef = useRef<RegionSelection | null>(null);
+  const translationRequestRef = useRef(0);
+  const translationDragRef = useRef<{
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
   useAutoGrowTextarea(inputRef, question, isComposerMaximized, 92);
 
   useEffect(() => {
@@ -469,6 +486,57 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     setSelectedQuote(null);
     setSelectionAction(null);
     inputRef.current?.focus();
+  }
+
+  async function translateSelection(action: SelectionAction) {
+    const request = ++translationRequestRef.current;
+    const bubbleWidth = Math.min(320, window.innerWidth - 24);
+    const left = clamp(
+      action.left - bubbleWidth / 2,
+      12,
+      Math.max(12, window.innerWidth - bubbleWidth - 12),
+    );
+    const top = clamp(
+      action.top + 36,
+      12,
+      Math.max(12, window.innerHeight - 292),
+    );
+    setSelectionAction(null);
+    setTranslation({
+      text: '翻译中...',
+      left,
+      top,
+      failed: false,
+    });
+    try {
+      const result = await bridge.translate(
+        action.quote.text.slice(0, 4_000),
+        action.quote.section,
+      );
+      if (request !== translationRequestRef.current) return;
+      setTranslation((current) =>
+        current
+          ? {
+              ...current,
+              text: result.trim() || '未返回译文',
+              failed: false,
+            }
+          : null,
+      );
+    } catch (cause) {
+      if (request !== translationRequestRef.current) return;
+      const message =
+        cause instanceof Error ? cause.message : '操作失败，请重试。';
+      setTranslation((current) =>
+        current
+          ? {
+              ...current,
+              text: `翻译失败：${message}`,
+              failed: true,
+            }
+          : null,
+      );
+    }
   }
 
   async function quoteImage(image: ArticleImage, rect: DOMRect) {
@@ -719,6 +787,8 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
               setSelectionAction(null);
               return;
             }
+            translationRequestRef.current += 1;
+            setTranslation(null);
             setSelectedQuote(quote);
             const selection = window.getSelection();
             const rect =
@@ -810,20 +880,100 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
         </article>
 
         {selectionAction && (
-          <button
-            className="study-selection-action"
-            type="button"
-            aria-label="提问选中文字"
+          <div
+            className="study-selection-actions"
+            role="toolbar"
+            aria-label="选中文字操作"
             style={{
               left: selectionAction.left,
               top: selectionAction.top,
             }}
             onMouseDown={(event) => event.preventDefault()}
-            onClick={() => void quoteSelection(selectionAction.quote)}
           >
-            <Quote size={14} aria-hidden="true" />
-            提问
-          </button>
+            <button
+              type="button"
+              aria-label="提问选中文字"
+              onClick={() => void quoteSelection(selectionAction.quote)}
+            >
+              <Quote size={13} aria-hidden="true" />
+              提问
+            </button>
+            <button
+              type="button"
+              aria-label="翻译选中文字"
+              onClick={() => void translateSelection(selectionAction)}
+            >
+              <Languages size={13} aria-hidden="true" />
+              翻译
+            </button>
+          </div>
+        )}
+
+        {translation && (
+          <aside
+            className={`study-translation${
+              translation.failed ? ' study-translation--failed' : ''
+            }`}
+            role="status"
+            aria-label="划词译文"
+            aria-live="polite"
+            style={{
+              left: translation.left,
+              top: translation.top,
+            }}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              const bounds = event.currentTarget.getBoundingClientRect();
+              translationDragRef.current = {
+                pointerId: event.pointerId,
+                offsetX: event.clientX - bounds.left,
+                offsetY: event.clientY - bounds.top,
+              };
+              event.currentTarget.setPointerCapture(event.pointerId);
+              event.currentTarget.style.cursor = 'grabbing';
+              event.preventDefault();
+            }}
+            onPointerMove={(event) => {
+              const drag = translationDragRef.current;
+              if (!drag || drag.pointerId !== event.pointerId) return;
+              const bounds = event.currentTarget.getBoundingClientRect();
+              setTranslation((current) =>
+                current
+                  ? {
+                      ...current,
+                      left: clamp(
+                        event.clientX - drag.offsetX,
+                        8,
+                        Math.max(8, window.innerWidth - bounds.width - 8),
+                      ),
+                      top: clamp(
+                        event.clientY - drag.offsetY,
+                        8,
+                        Math.max(8, window.innerHeight - bounds.height - 8),
+                      ),
+                    }
+                  : null,
+              );
+            }}
+            onPointerUp={(event) => {
+              if (
+                translationDragRef.current?.pointerId !== event.pointerId
+              ) {
+                return;
+              }
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }
+              translationDragRef.current = null;
+              event.currentTarget.style.cursor = 'grab';
+            }}
+            onPointerCancel={(event) => {
+              translationDragRef.current = null;
+              event.currentTarget.style.cursor = 'grab';
+            }}
+          >
+            {translation.text}
+          </aside>
         )}
 
         {regionMode && (

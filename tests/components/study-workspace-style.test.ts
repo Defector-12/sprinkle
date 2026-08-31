@@ -111,4 +111,22 @@ describe('study workspace visual surface', () => {
     expect(preRule).toContain('overflow-wrap: anywhere');
     expect(preRule).toContain('white-space: pre-wrap');
   });
+
+  it('uses compact selection actions and a draggable translation surface', () => {
+    const studyCss = readFileSync(
+      new URL('../../src/styles/study.css', import.meta.url),
+      'utf8',
+    );
+    const actionRule =
+      studyCss.match(
+        /\.study-selection-actions button\s*\{([\s\S]*?)\}/,
+      )?.[1] ?? '';
+    const translationRule =
+      studyCss.match(/\.study-translation\s*\{([\s\S]*?)\}/)?.[1] ?? '';
+
+    expect(actionRule).toContain('height: 28px');
+    expect(actionRule).toContain('border-radius: 5px');
+    expect(translationRule).toContain('touch-action: none');
+    expect(translationRule).toContain('cursor: grab');
+  });
 });

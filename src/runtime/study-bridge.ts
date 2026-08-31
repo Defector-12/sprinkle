@@ -61,6 +61,15 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
     });
   }
 
+  translate(text: string, section: string): Promise<string> {
+    return sendRuntimeRequest<string>({
+      type: 'study:translate',
+      ...this.target,
+      text,
+      section,
+    });
+  }
+
   setTextFocus(text: string, section: string): Promise<PageContext> {
     return sendRuntimeRequest<PageContext>({
       type: 'study:focus:set',

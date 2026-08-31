@@ -920,28 +920,72 @@ textarea:focus-visible,
   cursor: pointer;
 }
 
-.study-selection-action {
+.study-selection-actions {
   position: fixed;
   z-index: 40;
   display: inline-flex;
-  min-height: 34px;
   align-items: center;
-  gap: 6px;
-  border: 1px solid var(--study-ink);
-  border-radius: 999px;
-  background: var(--study-ink);
-  box-shadow: 0 10px 28px oklch(20% 0.02 67 / 22%);
-  color: var(--study-paper);
-  padding: 0 12px;
-  font-size: 11px;
-  font-weight: 750;
-  cursor: pointer;
+  gap: 2px;
+  border: 1px solid oklch(28% 0.015 67 / 16%);
+  border-radius: 8px;
+  background: var(--study-paper);
+  box-shadow: 0 7px 20px oklch(20% 0.02 67 / 18%);
+  padding: 3px;
   transform: translateX(-50%);
 }
 
-.study-selection-action:hover {
-  border-color: var(--study-accent-dark);
+.study-selection-actions button {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--study-ink);
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.study-selection-actions button:hover {
+  background: var(--study-line);
+}
+
+.study-selection-actions button:last-child {
+  background: var(--study-accent);
+  color: white;
+}
+
+.study-selection-actions button:last-child:hover {
   background: var(--study-accent-dark);
+}
+
+.study-translation {
+  position: fixed;
+  z-index: 39;
+  width: min(320px, calc(100vw - 24px));
+  max-height: min(280px, calc(100vh - 24px));
+  overflow: auto;
+  border: 1px solid oklch(28% 0.015 67 / 15%);
+  border-radius: 8px;
+  background: var(--study-paper);
+  box-shadow: 0 10px 30px oklch(20% 0.02 67 / 20%);
+  color: var(--study-ink);
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.study-translation--failed {
+  color: var(--study-accent-dark);
 }
 
 .study-region-picker {

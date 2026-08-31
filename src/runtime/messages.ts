@@ -19,6 +19,7 @@ export type ExtensionRequest =
   | { type: 'context:activate' }
   | { type: 'context:clear' }
   | { type: 'chat:ask'; question: string }
+  | { type: 'translate'; text: string; section: string }
   | { type: 'study:open' }
   | { type: 'study:context:get'; tabId: number; url: string }
   | {
@@ -26,6 +27,13 @@ export type ExtensionRequest =
       tabId: number;
       url: string;
       question: string;
+    }
+  | {
+      type: 'study:translate';
+      tabId: number;
+      url: string;
+      text: string;
+      section: string;
     }
   | {
       type: 'study:focus:set';

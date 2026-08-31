@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildModelRequest } from '../../src/core/model-request.ts';
+import {
+  buildModelRequest,
+  buildTranslationRequest,
+} from '../../src/core/model-request.ts';
 import type {
   ArticleDocument,
   ChatMessage,
@@ -290,5 +293,37 @@ describe('buildModelRequest', () => {
 
     expect(serialized).toContain('本次请求包含当前已解析到的文章全文');
     expect(serialized).not.toContain('按全文位置均匀选取');
+  });
+});
+
+describe('buildTranslationRequest', () => {
+  it('uses article context but requests only a Chinese translation', () => {
+    const request = buildTranslationRequest({
+      article,
+      text: 'Working memory carries the current reasoning state.',
+      section: 'Memory types',
+      relevantChunks: [
+        {
+          id: 'chunk-1',
+          section: 'Memory types',
+          text: 'Short-term memory keeps the current task state.',
+          blockIds: ['memory'],
+        },
+      ],
+    });
+    const serialized = JSON.stringify(request.messages);
+
+    expect(request.messages.map((item) => item.role)).toEqual([
+      'system',
+      'user',
+    ]);
+    expect(serialized).toContain('自动识别所选文字的语言');
+    expect(serialized).toContain('只输出译文');
+    expect(serialized).toContain(
+      'Short-term memory keeps the current task state.',
+    );
+    expect(serialized).toContain(
+      'Working memory carries the current reasoning state.',
+    );
   });
 });

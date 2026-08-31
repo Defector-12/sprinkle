@@ -142,6 +142,7 @@ function createBridge(
   return {
     initialize: vi.fn().mockResolvedValue(readyContext),
     ask: vi.fn().mockResolvedValue(readyContext),
+    translate: vi.fn().mockResolvedValue('工作记忆承载当前的推理状态。'),
     setTextFocus: vi.fn().mockResolvedValue(readyContext),
     setImageFocus: vi
       .fn()
@@ -461,6 +462,105 @@ describe('StudyWorkspace', () => {
       'Working memory',
       'Architecture',
     );
+  });
+
+  it('translates selected text in place without adding it as a quote', async () => {
+    let resolveTranslation: (value: string) => void = () => undefined;
+    const bridge = createBridge({
+      translate: vi.fn().mockReturnValue(
+        new Promise<string>((resolve) => {
+          resolveTranslation = resolve;
+        }),
+      ),
+    });
+    render(<StudyWorkspace bridge={bridge} />);
+    const paragraph = await screen.findByText(
+      'Working memory carries the current reasoning state.',
+    );
+    vi.spyOn(window, 'getSelection').mockReturnValue({
+      isCollapsed: false,
+      toString: () => 'Working memory',
+      anchorNode: paragraph.firstChild,
+      rangeCount: 1,
+      getRangeAt: () => ({
+        getBoundingClientRect: () => ({
+          left: 180,
+          top: 220,
+          right: 310,
+          bottom: 244,
+          width: 130,
+          height: 24,
+          x: 180,
+          y: 220,
+          toJSON: () => undefined,
+        }),
+      }),
+    } as unknown as Selection);
+
+    fireEvent.mouseUp(paragraph);
+    expect(
+      await screen.findByRole('button', { name: '提问选中文字' }),
+    ).toBeVisible();
+    await userEvent.click(
+      screen.getByRole('button', { name: '翻译选中文字' }),
+    );
+
+    expect(bridge.translate).toHaveBeenCalledWith(
+      'Working memory',
+      'Architecture',
+    );
+    const translation = screen.getByRole('status', {
+      name: '划词译文',
+    });
+    expect(translation).toHaveTextContent('翻译中...');
+    expect(bridge.setTextFocus).not.toHaveBeenCalled();
+
+    Object.defineProperties(translation, {
+      setPointerCapture: { value: vi.fn(), configurable: true },
+      hasPointerCapture: {
+        value: vi.fn().mockReturnValue(true),
+        configurable: true,
+      },
+      releasePointerCapture: { value: vi.fn(), configurable: true },
+    });
+    vi.spyOn(translation, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      top: 120,
+      right: 420,
+      bottom: 220,
+      width: 320,
+      height: 100,
+      x: 100,
+      y: 120,
+      toJSON: () => undefined,
+    });
+    fireEvent(
+      translation,
+      new MouseEvent('pointerdown', {
+        bubbles: true,
+        button: 0,
+        clientX: 120,
+        clientY: 140,
+      }),
+    );
+    fireEvent(
+      translation,
+      new MouseEvent('pointermove', {
+        bubbles: true,
+        clientX: 400,
+        clientY: 420,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(translation).toHaveStyle({ left: '380px', top: '400px' }),
+    );
+    await act(async () => {
+      resolveTranslation('工作记忆承载当前的推理状态。');
+    });
+
+    expect(translation).toHaveTextContent('工作记忆承载当前的推理状态。');
+    expect(translation).toHaveStyle({ left: '380px', top: '400px' });
   });
 
   it('provides an explicit point-image mode in the reader toolbar', async () => {

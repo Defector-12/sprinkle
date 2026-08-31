@@ -18,3 +18,17 @@ it('uses a defined HTML element for the assistant shadow host', () => {
     "document.createElement('context-reader-assistant')",
   );
 });
+
+it('provides compact selection actions and a draggable translation bubble', () => {
+  const contentScript = readFileSync(
+    new URL('../../entrypoints/content.ts', import.meta.url),
+    'utf8',
+  );
+
+  expect(contentScript).toContain("createSelectionAction('提问')");
+  expect(contentScript).toContain("createSelectionAction('翻译', true)");
+  expect(contentScript).toContain("height: '28px'");
+  expect(contentScript).toContain('makeDraggable(');
+  expect(contentScript).toContain('translationMoved = true');
+  expect(contentScript).toContain("type: 'translate'");
+});

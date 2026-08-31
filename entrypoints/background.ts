@@ -5,7 +5,10 @@ import {
   completeQuestionTurn,
   snapshotMessageReference,
 } from '../src/core/conversation-turn.ts';
-import { buildModelRequest } from '../src/core/model-request.ts';
+import {
+  buildModelRequest,
+  buildTranslationRequest,
+} from '../src/core/model-request.ts';
 import { createPageContext } from '../src/core/page-context.ts';
 import {
   planRetrievalQueries,
@@ -413,6 +416,47 @@ async function askPage(
   }
 }
 
+async function translateSelection(
+  text: string,
+  section: string,
+  tab: PageTab,
+): Promise<string> {
+  const selectedText = text.replace(/\s+/g, ' ').trim().slice(0, 4_000);
+  if (!selectedText) throw new Error('请先选择需要翻译的文字。');
+
+  const current = await getOrCreateContext(tab);
+  if (
+    !current.article ||
+    !['ready', 'partial', 'answering'].includes(current.status)
+  ) {
+    throw new Error('请先读取当前页面，再翻译所选文字。');
+  }
+
+  const settings = await loadSettings();
+  if (!settings.apiKey.trim()) {
+    throw new Error('请先在设置中填写 DeepSeek API Key。');
+  }
+
+  const chunks = createArticleChunks(articleContentBlocks(current.article));
+  const selectedContext = selectArticleContext(chunks, {
+    question: selectedText,
+    focusText: selectedText,
+    focusSection: section,
+    limit: 3,
+  });
+  const translation = await modelClient.complete(
+    settings.apiKey,
+    buildTranslationRequest({
+      article: current.article,
+      text: selectedText,
+      section: section.trim() || current.article.title,
+      relevantChunks: selectedContext.chunks,
+    }),
+  );
+  await requireMatchingTab(tab.id, tab.url);
+  return translation;
+}
+
 async function clearPage(tab: PageTab): Promise<PageContext> {
   invalidatePageOperations(createPageKey(tab.id, tab.url));
   await contexts.deletePage(tab.id, tab.url);
@@ -662,6 +706,14 @@ async function handleRequest(
         return success(
           await askPage(request.question, await requestTab(sender)),
         );
+      case 'translate':
+        return success(
+          await translateSelection(
+            request.text,
+            request.section,
+            await requestTab(sender),
+          ),
+        );
       case 'study:open':
         await openStudy(await requestTab(sender));
         return success(undefined);
@@ -670,6 +722,15 @@ async function handleRequest(
       case 'study:chat:ask':
         return success(
           await askPage(request.question, {
+            id: request.tabId,
+            url: request.url,
+            title: (await studyContext(request.tabId, request.url)).title,
+            windowId: sender.tab?.windowId ?? 0,
+          }),
+        );
+      case 'study:translate':
+        return success(
+          await translateSelection(request.text, request.section, {
             id: request.tabId,
             url: request.url,
             title: (await studyContext(request.tabId, request.url)).title,

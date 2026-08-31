@@ -39,6 +39,7 @@ describe('StudyWorkspaceBridge', () => {
 
     await bridge.initialize();
     await bridge.ask('这个结论如何得到？');
+    await bridge.translate('working memory', 'Architecture');
     await bridge.setTextFocus('selected theorem', 'Proof');
 
     expect(sendMessage).toHaveBeenNthCalledWith(1, {
@@ -53,6 +54,13 @@ describe('StudyWorkspaceBridge', () => {
       question: '这个结论如何得到？',
     });
     expect(sendMessage).toHaveBeenNthCalledWith(3, {
+      type: 'study:translate',
+      tabId: 7,
+      url: 'https://example.com/paper',
+      text: 'working memory',
+      section: 'Architecture',
+    });
+    expect(sendMessage).toHaveBeenNthCalledWith(4, {
       type: 'study:focus:set',
       tabId: 7,
       url: 'https://example.com/paper',

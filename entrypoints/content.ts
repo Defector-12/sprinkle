@@ -38,54 +38,230 @@ function sectionFor(element: Element | null): string {
   return sectionPathForElement(document, element, fallback);
 }
 
-function createSelectionButton(): HTMLButtonElement {
+interface SelectionToolbar {
+  element: HTMLDivElement;
+  askButton: HTMLButtonElement;
+  translateButton: HTMLButtonElement;
+}
+
+function createSelectionAction(
+  label: string,
+  emphasized = false,
+): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
-  button.setAttribute(UI_ATTRIBUTE, 'selection-button');
-  button.textContent = '提问';
+  button.textContent = label;
+  button.setAttribute('aria-label', `${label}选中文字`);
   Object.assign(button.style, {
     all: 'initial',
+    boxSizing: 'border-box',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '28px',
+    padding: '0 9px',
+    border: '0',
+    borderRadius: '5px',
+    background: emphasized ? '#e75a2c' : 'transparent',
+    color: emphasized ? '#fff' : '#272925',
+    font: '600 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    cursor: 'pointer',
+  });
+  return button;
+}
+
+function createSelectionToolbar(): SelectionToolbar {
+  const element = document.createElement('div');
+  element.setAttribute(UI_ATTRIBUTE, 'selection-toolbar');
+  Object.assign(element.style, {
+    all: 'initial',
+    boxSizing: 'border-box',
     position: 'fixed',
     zIndex: '2147483647',
     display: 'none',
     alignItems: 'center',
-    justifyContent: 'center',
-    height: '32px',
-    padding: '0 13px',
-    border: '1px solid rgba(255,255,255,.2)',
-    borderRadius: '999px',
-    background: '#1f211f',
-    color: '#fffaf1',
-    boxShadow: '0 8px 28px rgba(30,22,15,.24)',
-    font: '600 13px/1 "Avenir Next", sans-serif',
-    cursor: 'pointer',
+    gap: '2px',
+    padding: '3px',
+    border: '1px solid rgba(39,41,37,.16)',
+    borderRadius: '8px',
+    background: '#fffdf8',
+    boxShadow: '0 7px 20px rgba(30,22,15,.18)',
   });
-  document.documentElement.append(button);
-  return button;
+  const askButton = createSelectionAction('提问');
+  askButton.setAttribute(UI_ATTRIBUTE, 'selection-button');
+  const translateButton = createSelectionAction('翻译', true);
+  translateButton.setAttribute(UI_ATTRIBUTE, 'translation-button');
+  element.append(askButton, translateButton);
+  document.documentElement.append(element);
+  return { element, askButton, translateButton };
+}
+
+function createTranslationBubble(): HTMLDivElement {
+  const bubble = document.createElement('div');
+  bubble.setAttribute(UI_ATTRIBUTE, 'translation');
+  bubble.setAttribute('role', 'status');
+  bubble.setAttribute('aria-label', '划词译文');
+  bubble.setAttribute('aria-live', 'polite');
+  Object.assign(bubble.style, {
+    all: 'initial',
+    boxSizing: 'border-box',
+    position: 'fixed',
+    zIndex: '2147483646',
+    display: 'none',
+    width: 'max-content',
+    maxWidth: 'min(360px, calc(100vw - 24px))',
+    maxHeight: 'min(280px, calc(100vh - 24px))',
+    overflow: 'auto',
+    padding: '10px 12px',
+    border: '1px solid rgba(39,41,37,.15)',
+    borderRadius: '8px',
+    background: '#fffdf8',
+    boxShadow: '0 10px 30px rgba(30,22,15,.2)',
+    color: '#272925',
+    font: '500 13px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    overflowWrap: 'anywhere',
+    whiteSpace: 'pre-wrap',
+    cursor: 'grab',
+    touchAction: 'none',
+    userSelect: 'none',
+  });
+  document.documentElement.append(bubble);
+  return bubble;
+}
+
+function positionNearSelection(
+  element: HTMLElement,
+  rect: DOMRect,
+  preferBelow: boolean,
+): void {
+  const bounds = element.getBoundingClientRect();
+  const width = bounds.width || Math.min(360, window.innerWidth - 24);
+  const height = bounds.height || 40;
+  const left = Math.min(
+    Math.max(12, rect.left + rect.width / 2 - width / 2),
+    Math.max(12, window.innerWidth - width - 12),
+  );
+  const above = rect.top - height - 8;
+  const below = rect.bottom + 8;
+  const preferredTop = preferBelow ? below : above;
+  const fallbackTop = preferBelow ? above : below;
+  const top =
+    preferredTop >= 8 &&
+    preferredTop + height <= window.innerHeight - 8
+      ? preferredTop
+      : Math.min(
+          Math.max(8, fallbackTop),
+          Math.max(8, window.innerHeight - height - 8),
+        );
+  element.style.left = `${left}px`;
+  element.style.top = `${top}px`;
+}
+
+function makeDraggable(
+  element: HTMLElement,
+  onDrag: () => void,
+): () => void {
+  let drag:
+    | { pointerId: number; offsetX: number; offsetY: number }
+    | null = null;
+
+  const onPointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return;
+    const rect = element.getBoundingClientRect();
+    drag = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    element.setPointerCapture(event.pointerId);
+    element.style.cursor = 'grabbing';
+    event.preventDefault();
+  };
+  const onPointerMove = (event: PointerEvent) => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const rect = element.getBoundingClientRect();
+    const left = Math.min(
+      Math.max(8, event.clientX - drag.offsetX),
+      Math.max(8, window.innerWidth - rect.width - 8),
+    );
+    const top = Math.min(
+      Math.max(8, event.clientY - drag.offsetY),
+      Math.max(8, window.innerHeight - rect.height - 8),
+    );
+    element.style.left = `${left}px`;
+    element.style.top = `${top}px`;
+    onDrag();
+  };
+  const stopDragging = (event: PointerEvent) => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    if (element.hasPointerCapture(event.pointerId)) {
+      element.releasePointerCapture(event.pointerId);
+    }
+    drag = null;
+    element.style.cursor = 'grab';
+  };
+
+  element.addEventListener('pointerdown', onPointerDown);
+  element.addEventListener('pointermove', onPointerMove);
+  element.addEventListener('pointerup', stopDragging);
+  element.addEventListener('pointercancel', stopDragging);
+  return () => {
+    element.removeEventListener('pointerdown', onPointerDown);
+    element.removeEventListener('pointermove', onPointerMove);
+    element.removeEventListener('pointerup', stopDragging);
+    element.removeEventListener('pointercancel', stopDragging);
+  };
 }
 
 function installTextSelection(openAssistant: () => void): () => void {
   document
-    .querySelector(`[${UI_ATTRIBUTE}="selection-button"]`)
-    ?.remove();
-  const button = createSelectionButton();
+    .querySelectorAll(
+      `[${UI_ATTRIBUTE}="selection-toolbar"], [${UI_ATTRIBUTE}="selection-button"], [${UI_ATTRIBUTE}="translation"]`,
+    )
+    .forEach((element) => element.remove());
+  const toolbar = createSelectionToolbar();
+  const translation = createTranslationBubble();
   let selectedText = '';
   let selectedElement: Element | null = null;
+  let selectedRect: DOMRect | null = null;
+  let translationRequest = 0;
+  let translationMoved = false;
   let enabled = false;
+  const removeTranslationDrag = makeDraggable(
+    translation,
+    () => {
+      translationMoved = true;
+    },
+  );
 
-  const hide = () => {
-    button.style.display = 'none';
+  const hideToolbar = () => {
+    toolbar.element.style.display = 'none';
+  };
+  const hideTranslation = () => {
+    translationRequest += 1;
+    translation.style.display = 'none';
+  };
+  const showTranslation = (
+    text: string,
+    rect: DOMRect,
+    failed = false,
+    reposition = true,
+  ) => {
+    translation.textContent = text;
+    translation.style.color = failed ? '#a33a22' : '#272925';
+    translation.style.display = 'block';
+    if (reposition) positionNearSelection(translation, rect, true);
   };
 
   const showForSelection = () => {
     if (!enabled) {
-      hide();
+      hideToolbar();
       return;
     }
     const selection = window.getSelection();
     const text = cleanText(selection?.toString());
     if (!selection || selection.isCollapsed || text.length < 2) {
-      hide();
+      hideToolbar();
       return;
     }
 
@@ -99,12 +275,10 @@ function installTextSelection(openAssistant: () => void): () => void {
     if (selectedElement?.closest(`[${UI_ATTRIBUTE}]`)) return;
 
     selectedText = text.slice(0, 4_000);
-    button.style.left = `${Math.min(
-      window.innerWidth - 74,
-      Math.max(8, rect.left + rect.width / 2 - 30),
-    )}px`;
-    button.style.top = `${Math.max(8, rect.top - 42)}px`;
-    button.style.display = 'inline-flex';
+    selectedRect = rect;
+    hideTranslation();
+    toolbar.element.style.display = 'inline-flex';
+    positionNearSelection(toolbar.element, rect, false);
   };
 
   const onMouseUp = (event: MouseEvent) => {
@@ -121,27 +295,75 @@ function installTextSelection(openAssistant: () => void): () => void {
       text: selectedText,
       section: sectionFor(selectedElement),
     };
-    hide();
+    hideToolbar();
+    hideTranslation();
     await sendRuntimeRequest({ type: 'focus:set', focus })
       .then(openAssistant)
       .catch(() => undefined);
   };
+  const onTranslateClick = async () => {
+    if (!enabled || !selectedText || !selectedRect) return;
+    const text = selectedText;
+    const section = sectionFor(selectedElement);
+    const rect = selectedRect;
+    const request = ++translationRequest;
+    translationMoved = false;
+    hideToolbar();
+    showTranslation('翻译中...', rect);
+    try {
+      const result = await sendRuntimeRequest<string>({
+        type: 'translate',
+        text,
+        section,
+      });
+      if (request !== translationRequest) return;
+      showTranslation(
+        result.trim() || '未返回译文',
+        rect,
+        false,
+        !translationMoved,
+      );
+    } catch (cause) {
+      if (request !== translationRequest) return;
+      const message =
+        cause instanceof Error ? cause.message : '操作失败，请重试。';
+      showTranslation(
+        `翻译失败：${message}`,
+        rect,
+        true,
+        !translationMoved,
+      );
+    }
+  };
   const onActiveChange = (active: boolean) => {
     enabled = active;
-    if (!enabled) hide();
+    if (!enabled) {
+      hideToolbar();
+      hideTranslation();
+    }
   };
 
   document.addEventListener('mouseup', onMouseUp);
-  document.addEventListener('scroll', hide, true);
+  document.addEventListener('scroll', hideToolbar, true);
   const unsubscribeActive = subscribeAssistantActive(onActiveChange);
-  button.addEventListener('click', onButtonClick);
+  toolbar.askButton.addEventListener('mousedown', (event) =>
+    event.preventDefault(),
+  );
+  toolbar.translateButton.addEventListener('mousedown', (event) =>
+    event.preventDefault(),
+  );
+  toolbar.askButton.addEventListener('click', onButtonClick);
+  toolbar.translateButton.addEventListener('click', onTranslateClick);
 
   return () => {
     document.removeEventListener('mouseup', onMouseUp);
-    document.removeEventListener('scroll', hide, true);
+    document.removeEventListener('scroll', hideToolbar, true);
     unsubscribeActive();
-    button.removeEventListener('click', onButtonClick);
-    button.remove();
+    toolbar.askButton.removeEventListener('click', onButtonClick);
+    toolbar.translateButton.removeEventListener('click', onTranslateClick);
+    removeTranslationDrag();
+    toolbar.element.remove();
+    translation.remove();
   };
 }
 
