@@ -8,6 +8,11 @@ import {
 import { buildModelRequest } from '../src/core/model-request.ts';
 import { createPageContext } from '../src/core/page-context.ts';
 import {
+  planRetrievalQueries,
+  QUERY_PLANNER_TIMEOUT_MS,
+  shouldPlanRetrieval,
+} from '../src/core/query-planner.ts';
+import {
   articleContentBlocks,
   createArticleChunks,
   DEFAULT_RELEVANT_CHUNK_LIMIT,
@@ -262,26 +267,17 @@ async function performAskPage(
   }
 
   const settings = await loadSettings();
+  if (!settings.apiKey.trim()) {
+    throw new Error('请先在设置中填写 DeepSeek API Key。');
+  }
 
   const chunks = createArticleChunks(articleContentBlocks(current.article));
-  const selectedContext = selectArticleContext(chunks, {
+  let selectedContext = selectArticleContext(chunks, {
     question,
     focusText: current.focus?.text,
     focusSection: current.focus?.section,
     limit: DEFAULT_RELEVANT_CHUNK_LIMIT,
   });
-  const request = buildModelRequest({
-    article: current.article,
-    question,
-    relevantChunks: selectedContext.chunks,
-    history: current.messages,
-    focus: current.focus,
-    contextMode: selectedContext.mode,
-    contextTruncated: selectedContext.isTruncated,
-  });
-  if (!settings.apiKey.trim()) {
-    throw new Error('请先在设置中填写 DeepSeek API Key。');
-  }
   const userMessage = message(
     'user',
     question,
@@ -298,6 +294,47 @@ async function performAskPage(
   await notify(withQuestion);
 
   try {
+    if (
+      !current.focus &&
+      selectedContext.mode === 'relevant' &&
+      shouldPlanRetrieval({
+        question,
+        hasEvidence: selectedContext.chunks.length > 0,
+        hasHistory: current.messages.some(
+          (item) => item.role === 'assistant' && !item.error,
+        ),
+      })
+    ) {
+      const plan = await planRetrievalQueries(
+        {
+          article: current.article,
+          question,
+          history: current.messages,
+        },
+        (request) =>
+          modelClient.complete(settings.apiKey, request, {
+            timeoutMs: QUERY_PLANNER_TIMEOUT_MS,
+          }),
+      );
+      requireCurrentPageOperation(operationKey, generation);
+      await requireMatchingTab(tab.id, tab.url);
+      if (plan) {
+        selectedContext = selectArticleContext(chunks, {
+          question,
+          searchQueries: [plan.rewrittenQuestion, ...plan.queries],
+          limit: DEFAULT_RELEVANT_CHUNK_LIMIT,
+        });
+      }
+    }
+    const request = buildModelRequest({
+      article: current.article,
+      question,
+      relevantChunks: selectedContext.chunks,
+      history: current.messages,
+      focus: current.focus,
+      contextMode: selectedContext.mode,
+      contextTruncated: selectedContext.isTruncated,
+    });
     const answer = await modelClient.complete(settings.apiKey, request);
     requireCurrentPageOperation(operationKey, generation);
     await requireMatchingTab(tab.id, tab.url);

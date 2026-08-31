@@ -12,6 +12,7 @@ export const DEFAULT_RELEVANT_CHUNK_LIMIT = 8;
 const RETRIEVAL_CHILD_CHARACTER_LIMIT = 900;
 const RETRIEVAL_CANDIDATE_LIMIT = 20;
 const RETRIEVAL_WINDOW_RADIUS = 1;
+const RECIPROCAL_RANK_FUSION_K = 60;
 
 const RETRIEVAL_STOP_WORDS = new Set([
   'an',
@@ -245,6 +246,7 @@ export function overlapScore(
 
 export interface RetrievalQuery {
   question: string;
+  searchQueries?: string[];
   focusText?: string;
   focusSection?: string;
   limit?: number;
@@ -358,11 +360,15 @@ export function retrieveRelevantChunks(
     }
   }
 
-  return retrieveBm25Windows(chunks, query.question, {
-    limit,
-    characterBudget:
-      query.characterBudget ?? RELEVANT_CONTEXT_CHARACTER_BUDGET,
-  });
+  return retrieveBm25Windows(
+    chunks,
+    [query.question, ...(query.searchQueries ?? [])],
+    {
+      limit,
+      characterBudget:
+        query.characterBudget ?? RELEVANT_CONTEXT_CHARACTER_BUDGET,
+    },
+  );
 }
 
 function retrievalTerms(value: string): string[] {
@@ -460,25 +466,61 @@ function evidenceWindow(
 
 function retrieveBm25Windows(
   chunks: ArticleChunk[],
-  question: string,
+  questions: string[],
   options: { limit: number; characterBudget: number },
 ): ArticleChunk[] {
-  const queryTerms = new Set(retrievalTerms(question));
-  if (!chunks.length || !queryTerms.size) return [];
+  if (!chunks.length) return [];
 
-  const minimumTermMatches = queryTerms.size >= 3 ? 2 : 1;
-  const candidates = buildChunkSearch(chunks)
-    .search(question)
-    .filter((result) => result.terms.length >= minimumTermMatches)
-    .slice(0, Math.max(RETRIEVAL_CANDIDATE_LIMIT, options.limit * 3));
+  const search = buildChunkSearch(chunks);
+  const fusedCandidates = new Map<
+    number,
+    { index: number; score: number; bestRank: number }
+  >();
+  const seenQuestions = new Set<string>();
+  const uniqueQuestions = questions
+    .map((value) => value.replace(/\s+/g, ' ').trim())
+    .filter((value) => {
+      const key = value.toLowerCase();
+      if (!key || seenQuestions.has(key)) return false;
+      seenQuestions.add(key);
+      return true;
+    });
+  for (const question of uniqueQuestions) {
+    const queryTerms = new Set(retrievalTerms(question));
+    if (!queryTerms.size) continue;
+    const minimumTermMatches = queryTerms.size >= 3 ? 2 : 1;
+    const results = search
+      .search(question)
+      .filter((result) => result.terms.length >= minimumTermMatches)
+      .slice(0, RETRIEVAL_CANDIDATE_LIMIT);
+    for (const [rank, result] of results.entries()) {
+      const index = Number(result.index);
+      if (!Number.isInteger(index)) continue;
+      const current = fusedCandidates.get(index);
+      const score =
+        (current?.score ?? 0) +
+        1 / (RECIPROCAL_RANK_FUSION_K + rank + 1);
+      fusedCandidates.set(index, {
+        index,
+        score,
+        bestRank: Math.min(current?.bestRank ?? rank, rank),
+      });
+    }
+  }
+  const candidates = [...fusedCandidates.values()].sort(
+    (left, right) =>
+      right.score - left.score ||
+      left.bestRank - right.bestRank ||
+      left.index - right.index,
+  );
   const selected: ArticleChunk[] = [];
   const coveredIndexes = new Set<number>();
   let usedCharacters = 0;
 
   for (const candidate of candidates) {
     if (selected.length >= options.limit) break;
-    const index = Number(candidate.index);
-    if (!Number.isInteger(index) || coveredIndexes.has(index)) continue;
+    const { index } = candidate;
+    if (coveredIndexes.has(index)) continue;
 
     const remainingBudget = options.characterBudget - usedCharacters;
     const window = evidenceWindow(

@@ -272,6 +272,42 @@ describe('article retrieval', () => {
     ).toEqual([]);
   });
 
+  it('fuses multiple query rankings to cover evidence from different sections', () => {
+    const chunks: ArticleChunk[] = [
+      {
+        id: 'latency',
+        section: 'Results > Latency',
+        text: 'Speculative decoding reduces inference latency by 35 percent.',
+        blockIds: ['latency'],
+      },
+      {
+        id: 'accuracy',
+        section: 'Results > Accuracy',
+        text: 'Constrained decoding improves exact-match accuracy by 8 points.',
+        blockIds: ['accuracy'],
+      },
+      {
+        id: 'background',
+        section: 'Background',
+        text: 'Language models generate tokens autoregressively.',
+        blockIds: ['background'],
+      },
+    ];
+
+    const selection = selectArticleContext(chunks, {
+      question: 'Compare the two reported improvements.',
+      searchQueries: [
+        'speculative decoding inference latency',
+        'constrained decoding exact match accuracy',
+      ],
+    });
+
+    expect(selection.chunks.map((chunk) => chunk.section)).toEqual([
+      'Results > Latency',
+      'Results > Accuracy',
+    ]);
+  });
+
   it('keeps a focused question near its document anchor instead of recalling similarly named sections', () => {
     const chunks: ArticleChunk[] = [
       {

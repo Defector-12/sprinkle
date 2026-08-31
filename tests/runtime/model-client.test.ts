@@ -94,6 +94,34 @@ describe('OpenAiCompatibleModelClient', () => {
     await rejection;
   });
 
+  it('allows a shorter timeout for an individual completion', async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn(
+      (_input: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        }),
+    );
+    const client = new OpenAiCompatibleModelClient(
+      {
+        endpoint: 'https://api.example.com/chat/completions',
+        model: 'vision-model',
+        timeoutMs: 45_000,
+      },
+      fetcher,
+    );
+
+    const completion = client.complete('secret', request, { timeoutMs: 100 });
+    const rejection = expect(completion).rejects.toEqual(
+      expect.objectContaining({ code: 'REQUEST_TIMEOUT' }),
+    );
+    await vi.advanceTimersByTimeAsync(100);
+
+    await rejection;
+  });
+
   it('sends one fixed model request and returns assistant text', async () => {
     const fetcher = vi.fn().mockResolvedValue(
       new Response(

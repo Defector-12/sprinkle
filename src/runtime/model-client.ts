@@ -25,6 +25,10 @@ export interface ModelConfig {
   timeoutMs?: number;
 }
 
+export interface CompletionOptions {
+  timeoutMs?: number;
+}
+
 const DEFAULT_REQUEST_TIMEOUT_MS = 45_000;
 
 type Fetcher = (
@@ -131,7 +135,11 @@ export class OpenAiCompatibleModelClient {
     private readonly fetcher: Fetcher = (input, init) => fetch(input, init),
   ) {}
 
-  async complete(apiKey: string, request: ModelRequest): Promise<string> {
+  async complete(
+    apiKey: string,
+    request: ModelRequest,
+    options: CompletionOptions = {},
+  ): Promise<string> {
     validateConfig(this.config);
     validateApiKey(apiKey, 'DeepSeek API Key');
 
@@ -144,7 +152,9 @@ export class OpenAiCompatibleModelClient {
         messages: request.messages,
         stream: false,
       },
-      this.config.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+      options.timeoutMs ??
+        this.config.timeoutMs ??
+        DEFAULT_REQUEST_TIMEOUT_MS,
     );
 
     if (!response.ok) {
