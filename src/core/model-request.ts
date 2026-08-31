@@ -38,6 +38,9 @@ function articleContext(
 function focusDescription(focus: FocusContext | null): string {
   if (!focus) return '';
   if (focus.type === 'text') {
+    if (focus.scope === 'section') {
+      return `\n\n用户当前选中的章节标题：\n${focus.text}\n章节路径：${focus.section}\n所提供上下文包含该章节及其下级章节。`;
+    }
     return `\n\n用户当前选中的内容：\n${focus.text}\n所属章节：${focus.section}`;
   }
 

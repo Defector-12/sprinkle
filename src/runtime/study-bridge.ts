@@ -5,6 +5,7 @@ import type {
   ImageFocus,
   PageContext,
   RegionFocus,
+  TextFocus,
 } from '../core/types.ts';
 import { normalizePageUrl } from '../core/url.ts';
 import { extensionUrl } from './extension-url.ts';
@@ -70,7 +71,12 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
     });
   }
 
-  setTextFocus(text: string, section: string): Promise<PageContext> {
+  setTextFocus(
+    text: string,
+    section: string,
+    scope?: TextFocus['scope'],
+    headingLevel?: number,
+  ): Promise<PageContext> {
     return sendRuntimeRequest<PageContext>({
       type: 'study:focus:set',
       ...this.target,
@@ -78,6 +84,8 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
         type: 'text',
         text,
         section,
+        ...(scope ? { scope } : {}),
+        ...(headingLevel ? { headingLevel } : {}),
       },
     });
   }

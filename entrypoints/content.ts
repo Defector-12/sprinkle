@@ -8,6 +8,7 @@ import {
   extractArticle,
   sectionPathForElement,
 } from '../src/core/article-extractor.ts';
+import { selectionScopeForElement } from '../src/core/selection-focus.ts';
 import type { FocusContext } from '../src/core/types.ts';
 import {
   publishAssistantOpen,
@@ -324,6 +325,7 @@ function installTextSelection(openAssistant: () => void): () => void {
       type: 'text',
       text: selectedText,
       section: sectionFor(selectedElement),
+      ...selectionScopeForElement(selectedElement),
     };
     hideToolbar();
     hideTranslation();

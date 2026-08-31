@@ -370,6 +370,60 @@ describe('article retrieval', () => {
     );
   });
 
+  it('includes descendant sections when the selected text is a section heading', () => {
+    const chunks: ArticleChunk[] = [
+      {
+        id: 'progressive-disclosure',
+        section: 'Understanding Progressive Disclosure',
+        text: 'Context injection uses progressive disclosure for efficient token usage.',
+        blockIds: ['progressive-disclosure'],
+      },
+      {
+        id: 'layer-1',
+        section:
+          'Understanding Progressive Disclosure > Layer 1: Index Display (Session Start)',
+        text: 'Shows observation titles with token cost estimates.',
+        blockIds: ['layer-1'],
+      },
+      {
+        id: 'layer-2',
+        section:
+          'Understanding Progressive Disclosure > Layer 2: On-Demand Details (MCP Tools)',
+        text: 'Searches, opens the timeline, and fetches full observations.',
+        blockIds: ['layer-2'],
+      },
+      {
+        id: 'layer-3',
+        section:
+          'Understanding Progressive Disclosure > Layer 3: Perfect Recall (Code Access)',
+        text: 'Reads source files, transcripts, and raw data when needed.',
+        blockIds: ['layer-3'],
+      },
+      {
+        id: 'next-section',
+        section: 'Multi-Prompt Sessions',
+        text: 'Sessions can span multiple prompts.',
+        blockIds: ['next-section'],
+      },
+    ];
+
+    const results = retrieveRelevantChunks(chunks, {
+      question: '解释一下这部分的三层分别都是什么',
+      focusText: 'Understanding Progressive Disclosure',
+      focusSection: 'Understanding Progressive Disclosure',
+      focusScope: 'section',
+      focusHeadingLevel: 2,
+    });
+
+    expect(results.map((chunk) => chunk.id)).toEqual([
+      'progressive-disclosure',
+      'layer-1',
+      'layer-2',
+      'layer-3',
+    ]);
+    expect(results.map((chunk) => chunk.id)).not.toContain('next-section');
+  });
+
   it('supports Chinese terms without requiring whitespace tokenization', () => {
     const chineseBlocks: ArticleBlock[] = [
       {

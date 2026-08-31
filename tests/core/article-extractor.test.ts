@@ -399,6 +399,46 @@ describe('extractArticle', () => {
     );
   });
 
+  it('preserves child section paths on Mintlify-style heading and span content', () => {
+    document.body.innerHTML = `
+      <main>
+        <div class="mdx-content">
+          <h1>Getting Started with Claude-Mem</h1>
+          <h2><span>Understanding Progressive Disclosure</span></h2>
+          <span>Context injection uses progressive disclosure for efficient token usage:</span>
+          <h3>Layer 1: Index Display (Session Start)</h3>
+          <ul><li>Shows observation titles with token cost estimates</li></ul>
+          <h3>Layer 2: On-Demand Details (MCP Tools)</h3>
+          <ul><li>Searches and fetches full observation details</li></ul>
+          <h3>Layer 3: Perfect Recall (Code Access)</h3>
+          <ul><li>Reads source files and raw transcripts when needed</li></ul>
+          <h2>Multi-Prompt Sessions</h2>
+          <p>Sessions can span multiple prompts.</p>
+        </div>
+      </main>
+    `;
+
+    const article = extractArticle(
+      document,
+      'https://docs.claude-mem.ai/usage/getting-started',
+    );
+
+    expect(
+      article.blocks
+        .filter((block) =>
+          block.section.startsWith('Understanding Progressive Disclosure'),
+        )
+        .map((block) => block.section),
+    ).toEqual(
+      expect.arrayContaining([
+        'Understanding Progressive Disclosure',
+        'Understanding Progressive Disclosure > Layer 1: Index Display (Session Start)',
+        'Understanding Progressive Disclosure > Layer 2: On-Demand Details (MCP Tools)',
+        'Understanding Progressive Disclosure > Layer 3: Perfect Recall (Code Access)',
+      ]),
+    );
+  });
+
   it('extracts X article text rendered through div and span containers', () => {
     document.title = 'Article / X';
     document.body.innerHTML = `

@@ -278,7 +278,7 @@ textarea:disabled {
 
 .cr-focus {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) 30px;
   flex: 0 0 auto;
   align-items: start;
   gap: var(--cr-space-2);

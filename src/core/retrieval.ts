@@ -4,6 +4,7 @@ import type {
   ArticleBlock,
   ArticleChunk,
   ArticleDocument,
+  TextFocus,
 } from './types.ts';
 
 export const WHOLE_ARTICLE_CHARACTER_BUDGET = 64_000;
@@ -249,6 +250,8 @@ export interface RetrievalQuery {
   searchQueries?: string[];
   focusText?: string;
   focusSection?: string;
+  focusScope?: TextFocus['scope'];
+  focusHeadingLevel?: number;
   limit?: number;
   characterBudget?: number;
 }
@@ -287,6 +290,29 @@ export function retrieveRelevantChunks(
   const normalizedFocusSection = (query.focusSection ?? '')
     .toLowerCase()
     .trim();
+
+  if (query.focusScope === 'section' && normalizedFocusSection) {
+    const sectionPrefix = `${normalizedFocusSection} > `;
+    const matches = chunks.filter((chunk) => {
+      if (query.focusHeadingLevel === 1) return true;
+      const section = chunk.section.toLowerCase();
+      return (
+        section === normalizedFocusSection ||
+        section.startsWith(sectionPrefix)
+      );
+    });
+    const selected: ArticleChunk[] = [];
+    let selectedLength = 0;
+    const characterBudget =
+      query.characterBudget ?? RELEVANT_CONTEXT_CHARACTER_BUDGET;
+    for (const chunk of matches) {
+      const nextLength = selectedLength + chunkCharacterLength(chunk);
+      if (nextLength > characterBudget) break;
+      selected.push(chunk);
+      selectedLength = nextLength;
+    }
+    if (selected.length) return selected;
+  }
 
   if (focusTokens.size || focusSectionTokens.size) {
     const focusedChunks = chunks.map((chunk, index) => {

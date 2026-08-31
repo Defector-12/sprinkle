@@ -248,6 +248,14 @@ describe('FloatingAssistant', () => {
       await screen.findByRole('dialog', { name: 'Context Reader 对话' }),
     ).toBeVisible();
     expect(screen.getByText('Mixture of Experts')).toBeVisible();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '取消引用' }),
+    );
+    expect(bridge.clearFocus).toHaveBeenCalledOnce();
+    await waitFor(() =>
+      expect(screen.queryByText('Mixture of Experts')).not.toBeInTheDocument(),
+    );
   });
 
   it('offers accessible image and region tools from the floating conversation', async () => {
@@ -380,7 +388,7 @@ describe('FloatingAssistant', () => {
     ).not.toBeInTheDocument();
 
     await userEvent.click(
-      screen.getByRole('button', { name: '移除图片引用' }),
+      screen.getByRole('button', { name: '取消引用' }),
     );
     expect(bridge.clearFocus).toHaveBeenCalledOnce();
   });

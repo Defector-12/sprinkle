@@ -142,7 +142,8 @@ article -> main -> [role="main"] -> body
 2. `createArticleChunks` 按章节生成不超过 900 字符的检索子片段。
 3. `selectArticleContext` 选择请求模式：
    - 普通问题：使用 MiniSearch BM25 对章节路径和正文进行加权召回，候选必须命中足够的有效词项；命中子片段后扩展同章节前后邻近片段，在 24,000 字符预算内最多返回 8 个证据窗口。
-   - 显式引用：章节路径精确优先，仅取锚点及同一上级小节邻近片段，最多 3 个。
+   - 显式正文引用：章节路径精确优先，仅取锚点及同一上级小节邻近片段，最多 3 个。
+   - 显式标题引用：记录标题层级，将完整章节路径及其所有下级章节按原文顺序加入上下文，受 24,000 字符预算约束；一级标题覆盖全文。
    - 全文型问题：64,000 字符内发送全部；超限时均匀选取首、中、尾。
 4. 无引用、非全文问题在 BM25 无可靠命中、连续追问含指代词、或要求比较多处证据时进入查询规划：
    - 规划请求只包含文章标题、章节目录、最多 3,000 字符摘要和最近 2 轮完整问答，不发送整篇正文。
@@ -150,9 +151,10 @@ article -> main -> [role="main"] -> body
    - 规划调用最长 10 秒，超时、接口失败或 JSON 无效时静默回退到原始 BM25 结果。
 5. 普通问题最终没有可靠命中时不回退到文章开头；模型请求会明确声明未找到直接证据。
 6. 新显式引用不携带旧问答，防止历史错误回答覆盖当前引用。
-7. 无新引用时，`selectConversationHistory` 负责长期对话记忆。
-8. `buildModelRequest` 将 system policy 与不受信任的网页资料分离。
-9. Background 在请求前写入用户消息，成功后写入回答并消费 focus。
+7. 当前引用可从悬浮窗或工作台取消；只有 Background 返回 `focus: null` 后 UI 才移除引用，历史消息中的引用快照不受影响。
+8. 无新引用时，`selectConversationHistory` 负责长期对话记忆。
+9. `buildModelRequest` 将 system policy 与不受信任的网页资料分离。
+10. Background 在请求前写入用户消息，成功后写入回答并消费 focus。
 
 全文型意图和首轮普通相关性在本地完成；困难问题会在用户提问后增加一次有上限的模型规划调用。底层仍不是 embedding。
 
@@ -227,6 +229,7 @@ VITE_MODEL_ID=deepseek-v4-flash-vision-exp
 | 模块 | 主要职责 |
 | --- | --- |
 | `src/core/article-extractor.ts` | DOM 解析、结构恢复、诊断 |
+| `src/core/selection-focus.ts` | 判断划词目标是否为章节标题并保留原始标题层级 |
 | `src/core/retrieval.ts` | 文章切片、引用锚定、全文模式 |
 | `src/core/query-planner.ts` | 查询改写触发、规划请求和结果校验 |
 | `src/core/model-request.ts` | 提示词和模型消息 |

@@ -87,6 +87,34 @@ describe('StudyWorkspaceBridge', () => {
     });
   });
 
+  it('preserves section scope when a heading is quoted', async () => {
+    sendMessage.mockResolvedValue({ ok: true, data: undefined });
+    const bridge = new StudyWorkspaceBridge({
+      tabId: 7,
+      url: 'https://example.com/paper',
+    });
+
+    await bridge.setTextFocus(
+      'Architecture',
+      'Architecture',
+      'section',
+      2,
+    );
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'study:focus:set',
+      tabId: 7,
+      url: 'https://example.com/paper',
+      focus: {
+        type: 'text',
+        text: 'Architecture',
+        section: 'Architecture',
+        scope: 'section',
+        headingLevel: 2,
+      },
+    });
+  });
+
   it('opens learning records through background', async () => {
     sendMessage.mockResolvedValue({ ok: true, data: undefined });
     const bridge = new StudyWorkspaceBridge({

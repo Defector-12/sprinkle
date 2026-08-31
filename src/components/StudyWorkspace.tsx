@@ -30,8 +30,10 @@ import type {
   ImageFocus,
   PageContext,
   RegionFocus,
+  TextFocus,
 } from '../core/types.ts';
 import { sanitizeMathMl } from '../core/mathml.ts';
+import { selectionScopeForElement } from '../core/selection-focus.ts';
 import type { StudyCaptureRect } from '../runtime/messages.ts';
 import {
   AssistantMarkdown,
@@ -51,7 +53,12 @@ export interface StudyWorkspaceBridgeContract {
   initialize(): Promise<PageContext>;
   ask(question: string): Promise<PageContext>;
   translate(text: string, section: string): Promise<string>;
-  setTextFocus(text: string, section: string): Promise<PageContext>;
+  setTextFocus(
+    text: string,
+    section: string,
+    scope?: TextFocus['scope'],
+    headingLevel?: number,
+  ): Promise<PageContext>;
   setImageFocus(focus: ImageFocus): Promise<PageContext>;
   setRegionFocus(focus: RegionFocus): Promise<PageContext>;
   captureRegion(rect: StudyCaptureRect): Promise<string>;
@@ -77,6 +84,8 @@ interface RegionSelection {
 interface TextQuote {
   text: string;
   section: string;
+  scope?: TextFocus['scope'];
+  headingLevel?: number;
 }
 
 interface SelectionAction {
@@ -133,6 +142,9 @@ function headingId(block: ArticleBlock): string {
 function blockElement(block: ArticleBlock) {
   const attributes = {
     'data-section': block.section,
+    ...(block.type === 'heading'
+      ? { 'data-context-reader-heading-level': block.level ?? 2 }
+      : {}),
   };
   switch (block.type) {
     case 'heading': {
@@ -320,7 +332,12 @@ function FocusPreview({
             : focus.text || '框选区域'}
         </p>
       </div>
-      <button type="button" aria-label="移除引用" onClick={onClear}>
+      <button
+        type="button"
+        aria-label="取消引用"
+        title="取消引用"
+        onClick={onClear}
+      >
         <X size={15} aria-hidden="true" />
       </button>
     </aside>
@@ -495,6 +512,7 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
         context?.article?.title ||
         context?.title ||
         '当前资料',
+      ...selectionScopeForElement(element ?? null),
     };
   }
 
@@ -505,9 +523,19 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
       return;
     }
     setError(null);
-    setContext(
-      await bridge.setTextFocus(quote.text.slice(0, 4_000), quote.section),
-    );
+    const nextContext =
+      quote.scope === 'section'
+        ? await bridge.setTextFocus(
+            quote.text.slice(0, 4_000),
+            quote.section,
+            quote.scope,
+            quote.headingLevel,
+          )
+        : await bridge.setTextFocus(
+            quote.text.slice(0, 4_000),
+            quote.section,
+          );
+    setContext(nextContext);
     setSelectedQuote(null);
     setSelectionAction(null);
     inputRef.current?.focus();
@@ -684,6 +712,15 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
       setError(cause instanceof Error ? cause.message : '问题发送失败');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function clearFocus() {
+    setError(null);
+    try {
+      setContext(await bridge.clearFocus());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '无法取消引用');
     }
   }
 
@@ -1186,7 +1223,7 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
         <div className="study-composer">
           <FocusPreview
             context={context}
-            onClear={() => void bridge.clearFocus().then(setContext)}
+            onClear={() => void clearFocus()}
           />
           <label className="sr-only" htmlFor="study-question">
             向当前资料提问

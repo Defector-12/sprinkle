@@ -157,6 +157,33 @@ describe('buildModelRequest', () => {
     expect(serialized).not.toContain('reviewed by code owners');
   });
 
+  it('tells the model when a selected heading represents its whole section', () => {
+    const request = buildModelRequest({
+      article,
+      question: 'Explain the three layers.',
+      relevantChunks: [
+        {
+          id: 'layer-1',
+          section: 'Progressive Disclosure > Layer 1',
+          text: 'The first layer shows an index.',
+          blockIds: ['layer-1'],
+        },
+      ],
+      history: [],
+      focus: {
+        type: 'text',
+        text: 'Progressive Disclosure',
+        section: 'Progressive Disclosure',
+        scope: 'section',
+        headingLevel: 2,
+      },
+    });
+    const serialized = JSON.stringify(request.messages);
+
+    expect(serialized).toContain('用户当前选中的章节标题');
+    expect(serialized).toContain('该章节及其下级章节');
+  });
+
   it('excludes unanswered history and keeps complete history within budget', () => {
     const history: ChatMessage[] = Array.from({ length: 5 }, (_, index) => [
       {

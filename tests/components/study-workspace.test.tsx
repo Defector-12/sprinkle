@@ -252,16 +252,24 @@ describe('StudyWorkspace', () => {
         source: 'screenshot',
       },
     };
+    const bridge = createBridge({
+      initialize: vi.fn().mockResolvedValue(focusedContext),
+      clearFocus: vi.fn().mockResolvedValue({ ...focusedContext, focus: null }),
+    });
     render(
-      <StudyWorkspace
-        bridge={createBridge({
-          initialize: vi.fn().mockResolvedValue(focusedContext),
-        })}
-      />,
+      <StudyWorkspace bridge={bridge} />,
     );
 
     expect(await screen.findByText('图片引用')).toBeVisible();
     expect(screen.queryByText('图片引用 · DeepSeek')).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '取消引用' }),
+    );
+    expect(bridge.clearFocus).toHaveBeenCalledOnce();
+    await waitFor(() =>
+      expect(screen.queryByText('图片引用')).not.toBeInTheDocument(),
+    );
   });
 
   it('renders GFM answers and keeps the image reference attached to its question', async () => {
@@ -465,6 +473,28 @@ describe('StudyWorkspace', () => {
     expect(bridge.setTextFocus).toHaveBeenCalledWith(
       'Working memory',
       'Architecture',
+    );
+  });
+
+  it('marks a selected heading as a section reference', async () => {
+    const bridge = createBridge();
+    render(<StudyWorkspace bridge={bridge} />);
+    const heading = await screen.findByRole('heading', {
+      name: 'Architecture',
+      level: 2,
+    });
+    mockTextSelection(heading, 'Architecture');
+
+    fireEvent.mouseUp(heading);
+    await userEvent.click(
+      await screen.findByRole('button', { name: '提问选中文字' }),
+    );
+
+    expect(bridge.setTextFocus).toHaveBeenCalledWith(
+      'Architecture',
+      'Architecture',
+      'section',
+      2,
     );
   });
 

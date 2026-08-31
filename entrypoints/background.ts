@@ -279,6 +279,12 @@ async function performAskPage(
     question,
     focusText: current.focus?.text,
     focusSection: current.focus?.section,
+    focusScope:
+      current.focus?.type === 'text' ? current.focus.scope : undefined,
+    focusHeadingLevel:
+      current.focus?.type === 'text'
+        ? current.focus.headingLevel
+        : undefined,
     limit: DEFAULT_RELEVANT_CHUNK_LIMIT,
   });
   const userMessage = message(

@@ -13,7 +13,6 @@ import {
   Scan,
   Send,
   Settings,
-  Trash2,
   Upload,
   X,
 } from 'lucide-react';
@@ -1101,15 +1100,16 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
                         : context.focus.text || '框选区域'}
                     </strong>
                   </div>
-                  <button
-                    type="button"
-                    aria-label="移除图片引用"
-                    onClick={() => void clearFocus()}
-                  >
-                    <Trash2 size={15} aria-hidden="true" />
-                  </button>
                 </>
               )}
+              <button
+                type="button"
+                aria-label="取消引用"
+                title="取消引用"
+                onClick={() => void clearFocus()}
+              >
+                <X size={15} aria-hidden="true" />
+              </button>
             </aside>
           )}
 

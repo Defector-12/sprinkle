@@ -31,6 +31,9 @@ it('provides compact selection actions and a draggable translation bubble', () =
   expect(contentScript).toContain('makeDraggable(');
   expect(contentScript).toContain('translationMoved = true');
   expect(contentScript).toContain("type: 'translate'");
+  expect(contentScript).toContain(
+    '...selectionScopeForElement(selectedElement)',
+  );
   expect(contentScript).toMatch(
     /document\.addEventListener\(\s*'pointerdown',\s*onDocumentPointerDown,\s*true,\s*\)/,
   );

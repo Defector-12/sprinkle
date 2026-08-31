@@ -105,6 +105,8 @@ export interface TextFocus {
   type: 'text';
   text: string;
   section: string;
+  scope?: 'section';
+  headingLevel?: number;
 }
 
 export interface ImageFocus {
