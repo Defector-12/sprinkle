@@ -17,6 +17,7 @@ export function createPageContext(
     focus: null,
     messages: [],
     warning: null,
+    warningDetail: null,
     updatedAt: Date.now(),
   };
 }

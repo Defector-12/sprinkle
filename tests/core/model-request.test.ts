@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildModelRequest,
   buildTranslationRequest,
+  shouldRetryUnchangedTranslation,
 } from '../../src/core/model-request.ts';
 import type {
   ArticleDocument,
@@ -345,12 +346,48 @@ describe('buildTranslationRequest', () => {
       'user',
     ]);
     expect(serialized).toContain('自动识别所选文字的语言');
+    expect(serialized).toContain('即使它位于代码字符串或行内代码中');
     expect(serialized).toContain('只输出译文');
     expect(serialized).toContain(
       'Short-term memory keeps the current task state.',
     );
     expect(serialized).toContain(
       'Working memory carries the current reasoning state.',
+    );
+  });
+
+  it('retries when a lowercase English term is returned unchanged', () => {
+    expect(shouldRetryUnchangedTranslation('ephemeral', 'ephemeral')).toBe(
+      true,
+    );
+    expect(
+      shouldRetryUnchangedTranslation('working memory', 'Working memory'),
+    ).toBe(true);
+    expect(
+      shouldRetryUnchangedTranslation('ephemeral', '临时的'),
+    ).toBe(false);
+    expect(
+      shouldRetryUnchangedTranslation('TypeScript', 'TypeScript'),
+    ).toBe(false);
+    expect(
+      shouldRetryUnchangedTranslation('cache_control', 'cache_control'),
+    ).toBe(false);
+    expect(shouldRetryUnchangedTranslation('已经是中文', '已经是中文')).toBe(
+      false,
+    );
+  });
+
+  it('strengthens the retry request when the first result was unchanged', () => {
+    const request = buildTranslationRequest({
+      article,
+      text: 'ephemeral',
+      section: 'Prompt cache',
+      relevantChunks: [],
+      forceTranslation: true,
+    });
+
+    expect(JSON.stringify(request.messages)).toContain(
+      '不得再次原样返回英文单词',
     );
   });
 });

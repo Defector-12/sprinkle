@@ -17,6 +17,8 @@ interface DiagnosticIssue {
   title: string;
   summary: string;
   evidence: string;
+  detailTitle?: string;
+  details?: string[];
   suggestions: string[];
 }
 
@@ -136,7 +138,7 @@ export function buildDiagnosticIssues(
       title: '页面可能仍在加载',
       summary: `检测到 ${diagnostics.loadingIndicatorCount} 个加载态信号`,
       evidence:
-        '启用插件时页面仍存在 aria-busy、data-loading、loading 或 skeleton 标记，正文可能尚未进入 DOM。',
+        '启用插件时页面仍存在 aria-busy="true"、明确的 data-loading 状态、loading 或 skeleton 标记，正文可能尚未进入 DOM。',
       suggestions: [
         '等待页面加载或滚动完成后，点击“重新理解页面”。',
         '对于无限滚动页面，先滚动到需要阅读的内容区域。',
@@ -183,6 +185,33 @@ export function buildDiagnosticIssues(
   return issues;
 }
 
+function readingScopeIssue(article: ArticleDocument): DiagnosticIssue {
+  const sectionCounts = new Map<string, number>();
+  for (const block of article.blocks) {
+    sectionCounts.set(
+      block.section,
+      (sectionCounts.get(block.section) ?? 0) + 1,
+    );
+  }
+  const details = [...sectionCounts.entries()].map(
+    ([section, count]) => `${section}（${count} 个内容块）`,
+  );
+
+  return {
+    id: 'reading-scope',
+    title: '已读取内容范围',
+    summary: `${article.blocks.length} 个内容块，覆盖 ${details.length} 个章节`,
+    evidence:
+      '下面列出的是已经进入提问上下文的章节。页面中未进入 DOM、iframe 或尚未加载的内容无法仅凭提取结果逐项命名。',
+    detailTitle: '已读取章节',
+    details,
+    suggestions: [
+      '将列表与网页目录对照，可以快速确认缺少哪个章节。',
+      '如果列表完整但仍显示“部分内容”，请返回诊断概览查看触发判定的结构信号。',
+    ],
+  };
+}
+
 export function ArticleDiagnosticsPanel({
   article,
   onBack,
@@ -190,9 +219,11 @@ export function ArticleDiagnosticsPanel({
 }: ArticleDiagnosticsPanelProps) {
   const diagnostics = article.diagnostics ?? fallbackDiagnostics(article);
   const issues = buildDiagnosticIssues(diagnostics);
+  const scopeIssue = readingScopeIssue(article);
+  const allIssues = [scopeIssue, ...issues];
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const selectedIssue =
-    issues.find((issue) => issue.id === selectedIssueId) ?? null;
+    allIssues.find((issue) => issue.id === selectedIssueId) ?? null;
 
   if (selectedIssue) {
     return (
@@ -215,6 +246,16 @@ export function ArticleDiagnosticsPanel({
         <div className="cr-diagnostics__detail">
           <h3>检测依据</h3>
           <p>{selectedIssue.evidence}</p>
+          {selectedIssue.details?.length ? (
+            <>
+              <h3>{selectedIssue.detailTitle || '详细信息'}</h3>
+              <ol>
+                {selectedIssue.details.map((detail) => (
+                  <li key={detail}>{detail}</li>
+                ))}
+              </ol>
+            </>
+          ) : null}
           <h3>建议操作</h3>
           <ol>
             {selectedIssue.suggestions.map((suggestion) => (
@@ -266,6 +307,20 @@ export function ArticleDiagnosticsPanel({
           </div>
         )}
       </dl>
+
+      <div className="cr-diagnostics__issues cr-diagnostics__scope">
+        <h3>读取范围</h3>
+        <button
+          type="button"
+          onClick={() => setSelectedIssueId(scopeIssue.id)}
+        >
+          <span>
+            <strong>{scopeIssue.title}</strong>
+            <small>{scopeIssue.summary}</small>
+          </span>
+          <ChevronRight size={16} aria-hidden="true" />
+        </button>
+      </div>
 
       <div className="cr-diagnostics__issues">
         <h3>可能原因</h3>

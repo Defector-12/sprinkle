@@ -28,7 +28,10 @@ const CONTENT_SELECTOR = [
 
 const LOADING_SELECTOR = [
   '[aria-busy="true"]',
-  '[data-loading]:not([data-loading="false"])',
+  '[data-loading=""]',
+  '[data-loading="true"]',
+  '[data-loading="loading"]',
+  '[data-loading="pending"]',
   '.loading:not([hidden])',
   '.skeleton:not([hidden])',
 ].join(',');

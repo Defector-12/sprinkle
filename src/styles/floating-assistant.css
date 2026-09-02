@@ -548,16 +548,22 @@ textarea:disabled {
 }
 
 .cr-diagnostics__metrics dd {
+  max-width: 68%;
   margin: 0;
   font-size: 11px;
   font-weight: 700;
   text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .cr-diagnostics__issues {
   display: grid;
   gap: 2px;
   padding-block: var(--cr-space-3);
+}
+
+.cr-diagnostics__scope {
+  padding-bottom: 0;
 }
 
 .cr-diagnostics__issues h3,
@@ -631,6 +637,23 @@ textarea:disabled {
   display: grid;
   gap: 6px;
   padding-left: 20px;
+}
+
+.cr-problem-details--error .cr-diagnostics__heading > svg {
+  color: var(--cr-color-error);
+}
+
+.cr-problem-details--warning .cr-diagnostics__heading > svg {
+  color: var(--cr-color-warning);
+}
+
+.cr-problem-details__message {
+  color: var(--cr-color-ink);
+  font-weight: 650;
+}
+
+.cr-problem-details__url {
+  overflow-wrap: anywhere;
 }
 
 .cr-diagnostics__retry {
@@ -838,9 +861,42 @@ textarea:disabled {
 .cr-warning {
   margin: 0 var(--cr-space-3) var(--cr-space-2);
   border-radius: var(--cr-radius-sm);
-  padding: var(--cr-space-2);
   font-size: 11px;
   line-height: 1.45;
+}
+
+.cr-error > button,
+.cr-warning > button {
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cr-space-2);
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  padding: var(--cr-space-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cr-error > button:hover,
+.cr-warning > button:hover {
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+
+.cr-error > button > span,
+.cr-warning > button > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cr-error > button > svg,
+.cr-warning > button > svg {
+  flex: 0 0 auto;
 }
 
 .cr-error {

@@ -314,6 +314,47 @@ describe('extractArticle', () => {
     expect(article.diagnostics?.loadingIndicatorCount).toBe(1);
   });
 
+  it('does not confuse image source metadata with an active loading state', () => {
+    document.body.innerHTML = `
+      <article>
+        <h1>Agentic video understanding</h1>
+        <p>${'Complete article content is already available. '.repeat(5)}</p>
+        <img
+          src="/image-preview.webp"
+          loading="lazy"
+          data-loading='{"mobile":"/image-small.webp","desktop":"/image-large.webp"}'
+          alt="Video benchmark"
+        >
+      </article>
+    `;
+
+    const article = extractArticle(
+      document,
+      'https://blog.google/agentic-video',
+    );
+
+    expect(article.isPartial).toBe(false);
+    expect(article.diagnostics?.loadingIndicatorCount).toBe(0);
+  });
+
+  it('still recognizes explicit data-loading states', () => {
+    document.body.innerHTML = `
+      <article>
+        <h1>Streaming article</h1>
+        <p>${'Already rendered article content. '.repeat(8)}</p>
+        <div data-loading="true">Loading the remaining sections</div>
+      </article>
+    `;
+
+    const article = extractArticle(
+      document,
+      'https://example.com/data-loading',
+    );
+
+    expect(article.isPartial).toBe(true);
+    expect(article.diagnostics?.loadingIndicatorCount).toBe(1);
+  });
+
   it('selects the most content-rich article instead of the first article card', () => {
     document.body.innerHTML = `
       <main>

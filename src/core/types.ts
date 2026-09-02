@@ -179,6 +179,7 @@ export interface PageContext {
   focus: FocusContext | null;
   messages: ChatMessage[];
   warning: string | null;
+  warningDetail?: string | null;
   updatedAt: number;
 }
 

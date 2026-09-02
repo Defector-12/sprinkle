@@ -1,5 +1,6 @@
 import {
   Check,
+  ChevronRight,
   Image,
   KeyRound,
   LibraryBig,
@@ -37,6 +38,10 @@ import {
   messageAuthor,
   MessageReferenceCard,
 } from './MessageContent.tsx';
+import {
+  ProblemDetailsPanel,
+  type AssistantProblem,
+} from './ProblemDetailsPanel.tsx';
 import {
   imageFileFromClipboard,
   LOCAL_IMAGE_ACCEPT,
@@ -300,11 +305,99 @@ function statusLabel(context: PageContext | null): string {
   }
 }
 
+function errorMessage(cause: unknown, fallback: string): string {
+  return cause instanceof Error && cause.message.trim()
+    ? cause.message
+    : fallback;
+}
+
+function runtimeProblem(
+  title: string,
+  operation: string,
+  cause: unknown,
+  fallback: string,
+  impact: string,
+  pageUrl?: string,
+): AssistantProblem {
+  return {
+    severity: 'error',
+    title,
+    summary: errorMessage(cause, fallback),
+    operation,
+    impact,
+    pageUrl,
+    occurredAt: Date.now(),
+    suggestions: [
+      '确认当前页面和网络状态正常后重试。',
+      '如果问题持续出现，请记录这里的原始信息和发生环节。',
+    ],
+  };
+}
+
+function failedReadingProblem(context: PageContext): AssistantProblem {
+  return {
+    severity: 'error',
+    title: '页面理解失败',
+    summary: context.warning || '当前页面暂时无法读取。',
+    detail: context.warningDetail || context.warning || undefined,
+    operation: '读取网页内容',
+    impact: '正文没有成功进入提问上下文，当前无法基于页面内容回答。',
+    pageUrl: context.url,
+    occurredAt: context.updatedAt,
+    suggestions: [
+      '确认页面已加载完成，然后重新理解页面。',
+      '若重复失败，请保留此页的原始信息用于定位具体异常。',
+    ],
+  };
+}
+
+function apiKeyProblem(context: PageContext): AssistantProblem {
+  return {
+    severity: 'warning',
+    title: '尚未配置 API Key',
+    summary: '没有检测到可用的 DeepSeek API Key。',
+    operation: '检查模型配置',
+    impact: '页面内容已经读取，但在配置完成前无法发送问题。',
+    pageUrl: context.url,
+    occurredAt: Date.now(),
+    suggestions: [
+      '打开设置并填写有效的 DeepSeek API Key。',
+      '保存后回到当前页面即可继续提问，无需重新读取正文。',
+    ],
+  };
+}
+
+function contextWarningProblem(context: PageContext): AssistantProblem {
+  const archiveFailure = context.warning?.includes('归档失败');
+  return {
+    severity: 'warning',
+    title: archiveFailure ? '本地对话归档失败' : '页面提示',
+    summary: context.warning || '当前操作存在需要注意的信息。',
+    detail: context.warningDetail || undefined,
+    operation: archiveFailure ? '保存本地对话' : '处理当前页面',
+    impact: archiveFailure
+      ? '本次回答仍可查看，但刷新或关闭页面后可能不会出现在学习记录中。'
+      : '当前功能可能受限，请根据原始信息确认影响范围。',
+    pageUrl: context.url,
+    occurredAt: context.updatedAt,
+    suggestions: archiveFailure
+      ? [
+          '检查浏览器扩展的本地存储空间后重试。',
+          '在问题解决前不要关闭当前页面，以免丢失尚未归档的对话。',
+        ]
+      : [
+          '根据原始信息检查当前页面状态。',
+          '重新执行刚才的操作，确认问题是否仍然存在。',
+        ],
+  };
+}
+
 interface StatusPanelProps {
   context: PageContext | null;
   hasApiKey: boolean | null;
   onOpenSettings: () => void;
   onOpenDiagnostics: () => void;
+  onOpenProblem: (problem: AssistantProblem) => void;
   onRetry: () => void;
 }
 
@@ -313,6 +406,7 @@ function StatusPanel({
   hasApiKey,
   onOpenSettings,
   onOpenDiagnostics,
+  onOpenProblem,
   onRetry,
 }: StatusPanelProps) {
   const blockCount = context?.article?.blocks.length ?? 0;
@@ -344,6 +438,12 @@ function StatusPanel({
         <div>
           <strong>页面理解失败</strong>
           <p>{context.warning || '当前页面暂时无法读取。'}</p>
+          <button
+            type="button"
+            onClick={() => onOpenProblem(failedReadingProblem(context))}
+          >
+            查看问题详情
+          </button>
           <button type="button" onClick={onRetry}>
             重新理解页面
           </button>
@@ -364,6 +464,12 @@ function StatusPanel({
           <p>页面已经理解，填写 API Key 后即可提问。</p>
           <button type="button" onClick={onOpenSettings}>
             填写 API Key
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenProblem(apiKeyProblem(context))}
+          >
+            查看问题详情
           </button>
           {context.status === 'partial' && (
             <button type="button" onClick={onOpenDiagnostics}>
@@ -411,11 +517,13 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   const [isVisible, setIsVisible] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [problemDetails, setProblemDetails] =
+    useState<AssistantProblem | null>(null);
   const [question, setQuestion] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isComposerMaximized, setIsComposerMaximized] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AssistantProblem | null>(null);
   const [orbPos, setOrbPos] = useState<OrbPosition>(() =>
     defaultOrbPosition(),
   );
@@ -473,11 +581,52 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   const layout = dialogLayout(orbPos, dialogSize, dialogPosition);
   useAutoGrowTextarea(inputRef, question, isComposerMaximized, 64);
 
+  function reportProblem(
+    title: string,
+    operation: string,
+    cause: unknown,
+    fallback: string,
+    impact: string,
+  ): void {
+    setError(
+      runtimeProblem(
+        title,
+        operation,
+        cause,
+        fallback,
+        impact,
+        context?.url,
+      ),
+    );
+  }
+
+  async function runBridgeAction(
+    title: string,
+    operation: string,
+    fallback: string,
+    impact: string,
+    action: () => Promise<void>,
+  ): Promise<void> {
+    setError(null);
+    try {
+      await action();
+    } catch (cause) {
+      reportProblem(title, operation, cause, fallback, impact);
+    }
+  }
+
   async function refreshApiKeyStatus() {
     try {
       setHasApiKey(await bridge.hasApiKey());
-    } catch {
-      setHasApiKey(false);
+    } catch (cause) {
+      setHasApiKey(null);
+      reportProblem(
+        '配置状态读取失败',
+        '检查模型配置',
+        cause,
+        '无法检查 API Key 状态。',
+        '暂时无法确认模型是否可用，提问功能将保持禁用。',
+      );
     }
   }
 
@@ -492,6 +641,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             ...current,
             status: 'parsing',
             warning: null,
+            warningDetail: null,
           }
         : current,
     );
@@ -500,8 +650,12 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     try {
       setContext(await bridge.activate());
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : '页面理解失败，请稍后重试。',
+      reportProblem(
+        '页面理解失败',
+        '读取网页内容',
+        cause,
+        '页面理解失败，请稍后重试。',
+        '正文没有成功进入提问上下文，当前无法基于页面内容回答。',
       );
     }
   }
@@ -515,13 +669,18 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       setIsOpen(false);
       setIsVisible(false);
       setShowDiagnostics(false);
+      setProblemDetails(null);
       setDialogSize(null);
       setDialogPosition(null);
       setQuestion('');
       setIsComposerMaximized(false);
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : '停止理解失败，请稍后重试。',
+      reportProblem(
+        '停止理解失败',
+        '停止页面理解',
+        cause,
+        '停止理解失败，请稍后重试。',
+        '当前页面的已读取状态可能仍然保留。',
       );
     }
   }
@@ -529,6 +688,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   function closeDialog() {
     finishStreaming();
     setShowDiagnostics(false);
+    setProblemDetails(null);
     setIsComposerMaximized(false);
     setIsOpen(false);
   }
@@ -544,7 +704,16 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       })
       .catch((cause: unknown) => {
         if (active) {
-          setError(cause instanceof Error ? cause.message : '无法读取当前页面');
+          setError(
+            runtimeProblem(
+              '初始化失败',
+              '启动 Context Reader',
+              cause,
+              '无法读取当前页面',
+              '浮窗无法取得当前页面状态，部分功能可能不可用。',
+              location.href,
+            ),
+          );
         }
       });
 
@@ -632,7 +801,13 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       setContext(nextContext);
     } catch (cause) {
       cancelAnswer();
-      setError(cause instanceof Error ? cause.message : '问题发送失败');
+      reportProblem(
+        '问题发送失败',
+        '生成页面回答',
+        cause,
+        '问题发送失败',
+        '问题没有得到回答，已输入的问题也不会作为成功对话归档。',
+      );
     } finally {
       setIsSending(false);
     }
@@ -646,7 +821,13 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       await bridge.startImagePicker();
     } catch (cause) {
       setIsOpen(true);
-      setError(cause instanceof Error ? cause.message : '无法开始选择图片');
+      reportProblem(
+        '图片选择失败',
+        '点选页面图片',
+        cause,
+        '无法开始选择图片',
+        '当前没有新增图片引用，对话中的既有内容不受影响。',
+      );
     }
   }
 
@@ -658,7 +839,13 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       await bridge.startRegionPicker();
     } catch (cause) {
       setIsOpen(true);
-      setError(cause instanceof Error ? cause.message : '无法开始框选区域');
+      reportProblem(
+        '区域框选失败',
+        '框选页面区域',
+        cause,
+        '无法开始框选区域',
+        '当前没有新增区域引用，对话中的既有内容不受影响。',
+      );
     }
   }
 
@@ -679,7 +866,13 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
       );
       inputRef.current?.focus();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '无法上传图片');
+      reportProblem(
+        '图片上传失败',
+        '读取本地图片',
+        cause,
+        '无法上传图片',
+        '所选图片没有加入当前提问上下文。',
+      );
     } finally {
       setIsUploadingImage(false);
     }
@@ -690,7 +883,13 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     try {
       setContext(await bridge.clearFocus());
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '无法移除引用');
+      reportProblem(
+        '移除引用失败',
+        '清除当前引用',
+        cause,
+        '无法移除引用',
+        '当前引用可能仍会用于下一次提问。',
+      );
     }
   }
 
@@ -944,6 +1143,35 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     (context?.status === 'ready' || context?.status === 'partial');
   const canSelectImage =
     context?.status === 'ready' || context?.status === 'partial';
+  const problemAction =
+    problemDetails?.title === '尚未配置 API Key'
+      ? {
+          label: '打开设置',
+          onClick: () => {
+            setError(null);
+            void bridge.openSettings().catch((cause) => {
+              const problem = runtimeProblem(
+                '设置打开失败',
+                '打开设置',
+                cause,
+                '无法打开设置',
+                '模型配置页面没有打开。',
+                context?.url,
+              );
+              setError(problem);
+              setProblemDetails(problem);
+            });
+          },
+        }
+      : problemDetails?.operation === '读取网页内容'
+        ? {
+            label: '重新理解页面',
+            onClick: () => {
+              setProblemDetails(null);
+              void activatePage();
+            },
+          }
+        : undefined;
 
   if (!isVisible) return null;
 
@@ -1023,7 +1251,15 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             type="button"
             aria-label="打开学习记录"
             title="打开学习记录"
-            onClick={() => void bridge.openHistory()}
+            onClick={() =>
+              void runBridgeAction(
+                '学习记录打开失败',
+                '打开学习记录',
+                '无法打开学习记录',
+                '学习记录页面没有打开。',
+                () => bridge.openHistory(),
+              )
+            }
           >
             <LibraryBig size={17} aria-hidden="true" />
           </button>
@@ -1032,7 +1268,15 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             type="button"
             aria-label="打开学习工作台"
             title="打开全页学习工作台"
-            onClick={() => void bridge.openStudy()}
+            onClick={() =>
+              void runBridgeAction(
+                '学习工作台打开失败',
+                '打开学习工作台',
+                '无法打开学习工作台',
+                '全页学习工作台没有打开。',
+                () => bridge.openStudy(),
+              )
+            }
           >
             <PanelsTopLeft size={17} aria-hidden="true" />
           </button>
@@ -1040,7 +1284,15 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
             className="cr-icon-button"
             type="button"
             aria-label="打开设置"
-            onClick={() => void bridge.openSettings()}
+            onClick={() =>
+              void runBridgeAction(
+                '设置打开失败',
+                '打开设置',
+                '无法打开设置',
+                '模型配置页面没有打开。',
+                () => bridge.openSettings(),
+              )
+            }
           >
             <Settings size={17} aria-hidden="true" />
           </button>
@@ -1063,7 +1315,13 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
         </div>
       </header>
 
-      {showDiagnostics && context?.article ? (
+      {problemDetails ? (
+        <ProblemDetailsPanel
+          problem={problemDetails}
+          action={problemAction}
+          onBack={() => setProblemDetails(null)}
+        />
+      ) : showDiagnostics && context?.article ? (
         <ArticleDiagnosticsPanel
           article={context.article}
           onBack={() => setShowDiagnostics(false)}
@@ -1116,8 +1374,23 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           <StatusPanel
             context={context}
             hasApiKey={hasApiKey}
-            onOpenSettings={() => void bridge.openSettings()}
-            onOpenDiagnostics={() => setShowDiagnostics(true)}
+            onOpenSettings={() =>
+              void runBridgeAction(
+                '设置打开失败',
+                '打开设置',
+                '无法打开设置',
+                '模型配置页面没有打开。',
+                () => bridge.openSettings(),
+              )
+            }
+            onOpenDiagnostics={() => {
+              setProblemDetails(null);
+              setShowDiagnostics(true);
+            }}
+            onOpenProblem={(problem) => {
+              setShowDiagnostics(false);
+              setProblemDetails(problem);
+            }}
             onRetry={() => void activatePage()}
           />
 
@@ -1186,14 +1459,40 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
           )}
 
           <div className="cr-feedback" aria-live="polite" aria-atomic="true">
-        {error && (
-          <p className="cr-error" role="alert">
-            {error}
-          </p>
-        )}
-        {!error && context?.warning && context.status !== 'failed' && (
-          <p className="cr-warning">{context.warning}</p>
-        )}
+            {error && (
+              <div className="cr-error" role="alert">
+                <button
+                  type="button"
+                  aria-label={`查看问题详情：${error.summary}`}
+                  onClick={() => setProblemDetails(error)}
+                >
+                  <span>{error.summary}</span>
+                  <ChevronRight size={15} aria-hidden="true" />
+                </button>
+              </div>
+            )}
+            {!error && context?.warning && context.status !== 'failed' && (
+              <div className="cr-warning" role="status">
+                <button
+                  type="button"
+                  aria-label={`查看问题详情：${context.warning}`}
+                  onClick={() => {
+                    if (
+                      context.status === 'partial' &&
+                      context.article &&
+                      !context.warningDetail
+                    ) {
+                      setShowDiagnostics(true);
+                      return;
+                    }
+                    setProblemDetails(contextWarningProblem(context));
+                  }}
+                >
+                  <span>{context.warning}</span>
+                  <ChevronRight size={15} aria-hidden="true" />
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="cr-composer-tools" aria-label="图片引用工具">

@@ -8,6 +8,7 @@ import {
 import {
   buildModelRequest,
   buildTranslationRequest,
+  shouldRetryUnchangedTranslation,
 } from '../src/core/model-request.ts';
 import { createPageContext } from '../src/core/page-context.ts';
 import {
@@ -202,6 +203,7 @@ async function activatePage(tab: PageTab): Promise<PageContext> {
     ...current,
     status: 'parsing',
     warning: null,
+    warningDetail: null,
     updatedAt: Date.now(),
   };
   await contexts.save(parsing);
@@ -219,6 +221,7 @@ async function activatePage(tab: PageTab): Promise<PageContext> {
       article,
       status: article.isPartial ? 'partial' : 'ready',
       warning: article.isPartial ? '当前页面只读取到部分内容' : null,
+      warningDetail: null,
       updatedAt: Date.now(),
     };
     await contexts.save(ready);
@@ -230,15 +233,17 @@ async function activatePage(tab: PageTab): Promise<PageContext> {
       await contexts.deletePage(tab.id, tab.url);
       throw cause;
     }
+    const detail = errorMessage(cause);
     const failed: PageContext = {
       ...parsing,
       status: 'failed',
-      warning: errorMessage(cause),
+      warning: detail,
+      warningDetail: detail,
       updatedAt: Date.now(),
     };
     await contexts.save(failed);
     await notify(failed);
-    throw new Error('页面读取失败，请刷新页面后重试。');
+    throw new Error(`页面读取失败：${detail}`);
   }
 }
 
@@ -370,12 +375,13 @@ async function performAskPage(
       try {
         await conversations.save(completed);
         await notifyHistoryChanged();
-      } catch {
+      } catch (cause) {
         finalized = {
           ...completed,
           warning: [completed.warning, '回答已生成，但本地对话归档失败。']
             .filter(Boolean)
             .join('；'),
+          warningDetail: errorMessage(cause),
         };
         await contexts.save(finalized);
       }
@@ -450,15 +456,25 @@ async function translateSelection(
     focusSection: section,
     limit: 3,
   });
-  const translation = await modelClient.complete(
+  const translationInput = {
+    article: current.article,
+    text: selectedText,
+    section: section.trim() || current.article.title,
+    relevantChunks: selectedContext.chunks,
+  };
+  let translation = await modelClient.complete(
     settings.apiKey,
-    buildTranslationRequest({
-      article: current.article,
-      text: selectedText,
-      section: section.trim() || current.article.title,
-      relevantChunks: selectedContext.chunks,
-    }),
+    buildTranslationRequest(translationInput),
   );
+  if (shouldRetryUnchangedTranslation(selectedText, translation)) {
+    translation = await modelClient.complete(
+      settings.apiKey,
+      buildTranslationRequest({
+        ...translationInput,
+        forceTranslation: true,
+      }),
+    );
+  }
   await requireMatchingTab(tab.id, tab.url);
   return translation;
 }

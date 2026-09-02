@@ -775,6 +775,17 @@ describe('FloatingAssistant', () => {
     ).not.toBeInTheDocument();
 
     await userEvent.click(
+      screen.getByRole('button', { name: /已读取内容范围/ }),
+    );
+    expect(
+      screen.getByRole('heading', { name: '已读取内容范围' }),
+    ).toBeVisible();
+    expect(screen.getByText('Short note（1 个内容块）')).toBeVisible();
+    await userEvent.click(
+      screen.getByRole('button', { name: '返回诊断概览' }),
+    );
+
+    await userEvent.click(
       screen.getByRole('button', { name: /可读文字不足/ }),
     );
 
@@ -791,6 +802,98 @@ describe('FloatingAssistant', () => {
     expect(
       screen.getByRole('textbox', { name: '向当前文章提问' }),
     ).toBeVisible();
+  });
+
+  it('opens runtime error details from a visible error prompt', async () => {
+    const bridge = createBridge(readyContext, {
+      ask: vi
+        .fn()
+        .mockRejectedValue(
+          new Error('模型服务响应超时，请稍后重试。'),
+        ),
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    await userEvent.type(
+      screen.getByRole('textbox', { name: '向当前文章提问' }),
+      '总结当前页面',
+    );
+    await userEvent.keyboard('{Enter}');
+
+    const prompt = await screen.findByRole('button', {
+      name: '查看问题详情：模型服务响应超时，请稍后重试。',
+    });
+    expect(prompt).toBeVisible();
+    await userEvent.click(prompt);
+
+    expect(
+      screen.getByRole('heading', { name: '问题发送失败' }),
+    ).toBeVisible();
+    expect(screen.getByText('生成页面回答')).toBeVisible();
+    expect(screen.getAllByText('模型服务响应超时，请稍后重试。')).toHaveLength(
+      2,
+    );
+    expect(
+      screen.queryByRole('textbox', { name: '向当前文章提问' }),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '返回对话' }),
+    );
+    expect(
+      screen.getByRole('textbox', { name: '向当前文章提问' }),
+    ).toBeVisible();
+  });
+
+  it('shows details when a header action fails instead of hiding the error', async () => {
+    const bridge = createBridge(readyContext, {
+      openStudy: vi.fn().mockRejectedValue(new Error('无法创建新标签页')),
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: '打开学习工作台' }),
+    );
+
+    const prompt = await screen.findByRole('button', {
+      name: '查看问题详情：无法创建新标签页',
+    });
+    await userEvent.click(prompt);
+
+    expect(
+      screen.getByRole('heading', { name: '学习工作台打开失败' }),
+    ).toBeVisible();
+    expect(screen.getByText('打开学习工作台')).toBeVisible();
+  });
+
+  it('keeps the original warning detail available for self-diagnosis', async () => {
+    const bridge = createBridge({
+      ...readyContext,
+      warning: '回答已生成，但本地对话归档失败。',
+      warningDetail: 'QUOTA_BYTES quota exceeded',
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: '查看问题详情：回答已生成，但本地对话归档失败。',
+      }),
+    );
+
+    expect(
+      screen.getByRole('heading', { name: '本地对话归档失败' }),
+    ).toBeVisible();
+    expect(screen.getByText('QUOTA_BYTES quota exceeded')).toBeVisible();
+    expect(screen.getByText('保存本地对话')).toBeVisible();
   });
 
   it('drags the floating button without triggering a click-open', async () => {
