@@ -22,19 +22,18 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 
+import type { StudyWorkspaceBridgeContract } from '../application/ports.ts';
 import type {
   ArticleBlock,
   ArticleFormula,
   ArticleImage,
   ArticleTable,
-  ImageFocus,
   PageContext,
-  RegionFocus,
   TextFocus,
 } from '../core/types.ts';
 import { sanitizeMathMl } from '../core/mathml.ts';
+import { canAskPage } from '../core/page-context.ts';
 import { selectionScopeForElement } from '../core/selection-focus.ts';
-import type { StudyCaptureRect } from '../runtime/messages.ts';
 import {
   AssistantMarkdown,
   messageAuthor,
@@ -48,25 +47,6 @@ import {
 import { QuestionHistoryRail } from './QuestionHistoryRail.tsx';
 import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
 import { useStreamedAnswer } from './use-streamed-answer.ts';
-
-export interface StudyWorkspaceBridgeContract {
-  initialize(): Promise<PageContext>;
-  ask(question: string): Promise<PageContext>;
-  translate(text: string, section: string): Promise<string>;
-  setTextFocus(
-    text: string,
-    section: string,
-    scope?: TextFocus['scope'],
-    headingLevel?: number,
-  ): Promise<PageContext>;
-  setImageFocus(focus: ImageFocus): Promise<PageContext>;
-  setRegionFocus(focus: RegionFocus): Promise<PageContext>;
-  captureRegion(rect: StudyCaptureRect): Promise<string>;
-  clearFocus(): Promise<PageContext>;
-  openSource(): Promise<void>;
-  openHistory(): Promise<void>;
-  subscribe(listener: (context: PageContext) => void): () => void;
-}
 
 export interface StudyWorkspaceProps {
   bridge: StudyWorkspaceBridgeContract;
@@ -386,6 +366,7 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
     offsetY: number;
   } | null>(null);
   const translationVisible = translation !== null;
+  const canAsk = canAskPage(context);
   useAutoGrowTextarea(inputRef, question, isComposerMaximized, 92);
 
   useEffect(() => {
@@ -413,10 +394,17 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
 
   useEffect(() => {
     let active = true;
+    let receivedUpdate = false;
+    const unsubscribe = bridge.subscribe((nextContext) => {
+      if (!active) return;
+      receivedUpdate = true;
+      acceptAnswer(nextContext);
+      setContext(nextContext);
+    });
     void bridge
       .initialize()
       .then((nextContext) => {
-        if (active) setContext(nextContext);
+        if (active && !receivedUpdate) setContext(nextContext);
       })
       .catch((cause: unknown) => {
         if (active) {
@@ -425,11 +413,6 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
           );
         }
       });
-    const unsubscribe = bridge.subscribe((nextContext) => {
-      if (!active) return;
-      acceptAnswer(nextContext);
-      setContext(nextContext);
-    });
     return () => {
       active = false;
       unsubscribe();
@@ -523,22 +506,26 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
       return;
     }
     setError(null);
-    const nextContext =
-      quote.scope === 'section'
-        ? await bridge.setTextFocus(
-            quote.text.slice(0, 4_000),
-            quote.section,
-            quote.scope,
-            quote.headingLevel,
-          )
-        : await bridge.setTextFocus(
-            quote.text.slice(0, 4_000),
-            quote.section,
-          );
-    setContext(nextContext);
-    setSelectedQuote(null);
-    setSelectionAction(null);
-    inputRef.current?.focus();
+    try {
+      const nextContext =
+        quote.scope === 'section'
+          ? await bridge.setTextFocus(
+              quote.text.slice(0, 4_000),
+              quote.section,
+              quote.scope,
+              quote.headingLevel,
+            )
+          : await bridge.setTextFocus(
+              quote.text.slice(0, 4_000),
+              quote.section,
+            );
+      setContext(nextContext);
+      setSelectedQuote(null);
+      setSelectionAction(null);
+      inputRef.current?.focus();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '无法引用所选文字');
+    }
   }
 
   async function translateSelection(action: SelectionAction) {
@@ -698,7 +685,7 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
 
   async function sendQuestion() {
     const value = question.trim();
-    if (!value || busy) return;
+    if (!value || busy || !canAsk) return;
     setBusy(true);
     waitForAnswer(context);
     setError(null);
@@ -709,6 +696,7 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
       acceptAnswer(nextContext);
     } catch (cause) {
       cancelAnswer();
+      setQuestion(value);
       setError(cause instanceof Error ? cause.message : '问题发送失败');
     } finally {
       setBusy(false);
@@ -1278,7 +1266,7 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
               className="study-composer__send"
               type="button"
               aria-label="发送问题"
-              disabled={busy || !question.trim()}
+              disabled={busy || !canAsk || !question.trim()}
               onClick={() => void sendQuestion()}
             >
               {busy ? (

@@ -5,17 +5,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-export interface AssistantProblem {
-  severity: 'error' | 'warning';
-  title: string;
-  summary: string;
-  detail?: string;
-  operation: string;
-  impact: string;
-  pageUrl?: string;
-  occurredAt: number;
-  suggestions: string[];
-}
+import type { AssistantProblem } from '../application/assistant-problems.ts';
 
 export interface ProblemDetailsPanelProps {
   problem: AssistantProblem;

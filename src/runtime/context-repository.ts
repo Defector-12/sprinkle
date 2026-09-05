@@ -1,3 +1,4 @@
+import { SerialTaskQueue } from '../application/serial-task-queue.ts';
 import type {
   ArchivedConversation,
   ChatMessage,
@@ -34,7 +35,10 @@ function isPageContext(value: unknown): value is PageContext {
 }
 
 export class SessionContextRepository {
-  constructor(private readonly storage: StorageArea) {}
+  constructor(
+    private readonly storage: StorageArea,
+    private readonly mutations = new SerialTaskQueue(),
+  ) {}
 
   async get(tabId: number, url: string): Promise<PageContext | null> {
     const key = contextStorageKey(tabId, url);
@@ -43,8 +47,26 @@ export class SessionContextRepository {
   }
 
   async save(context: PageContext): Promise<void> {
-    await this.storage.set({
-      [contextStorageKey(context.tabId, context.url)]: context,
+    await this.mutations.run(async () => {
+      await this.storage.set({
+        [contextStorageKey(context.tabId, context.url)]: context,
+      });
+    });
+  }
+
+  async update(
+    tabId: number,
+    url: string,
+    updateContext: (current: PageContext) => PageContext,
+  ): Promise<PageContext | null> {
+    return this.mutations.run(async () => {
+      const key = contextStorageKey(tabId, url);
+      const result = await this.storage.get(key);
+      const current = isPageContext(result[key]) ? result[key] : null;
+      if (!current) return null;
+      const updated = updateContext(current);
+      await this.storage.set({ [key]: updated });
+      return updated;
     });
   }
 
@@ -71,56 +93,67 @@ export class SessionContextRepository {
     url: string,
     messages: ChatMessage[],
   ): Promise<PageContext[]> {
-    const matching = await this.listForUrl(url);
-    const updated = matching.map((context) => ({
-      ...context,
-      messages,
-      updatedAt: Date.now(),
-    }));
-    if (updated.length) {
-      await this.storage.set(
-        Object.fromEntries(
-          updated.map((context) => [
-            contextStorageKey(context.tabId, context.url),
-            context,
-          ]),
-        ),
+    return this.mutations.run(async () => {
+      const normalizedUrl = normalizePageUrl(url);
+      const matching = (await this.listAll()).filter(
+        (context) => context.normalizedUrl === normalizedUrl,
       );
-    }
-    return updated;
+      const updated = matching.map((context) => ({
+        ...context,
+        messages,
+        updatedAt: Date.now(),
+      }));
+      if (updated.length) {
+        await this.storage.set(
+          Object.fromEntries(
+            updated.map((context) => [
+              contextStorageKey(context.tabId, context.url),
+              context,
+            ]),
+          ),
+        );
+      }
+      return updated;
+    });
   }
 
   async clearAllMessages(): Promise<PageContext[]> {
-    const updated = (await this.listAll())
-      .filter((context) => context.messages.length > 0)
-      .map((context) => ({
-        ...context,
-        messages: [],
-        updatedAt: Date.now(),
-      }));
-    if (updated.length) {
-      await this.storage.set(
-        Object.fromEntries(
-          updated.map((context) => [
-            contextStorageKey(context.tabId, context.url),
-            context,
-          ]),
-        ),
-      );
-    }
-    return updated;
+    return this.mutations.run(async () => {
+      const updated = (await this.listAll())
+        .filter((context) => context.messages.length > 0)
+        .map((context) => ({
+          ...context,
+          messages: [],
+          updatedAt: Date.now(),
+        }));
+      if (updated.length) {
+        await this.storage.set(
+          Object.fromEntries(
+            updated.map((context) => [
+              contextStorageKey(context.tabId, context.url),
+              context,
+            ]),
+          ),
+        );
+      }
+      return updated;
+    });
   }
 
   async deletePage(tabId: number, url: string): Promise<void> {
-    await this.storage.remove(contextStorageKey(tabId, url));
+    await this.mutations.run(() =>
+      this.storage.remove(contextStorageKey(tabId, url)),
+    );
   }
 
   async deleteTab(tabId: number): Promise<void> {
-    const contexts = await this.listForTab(tabId);
-    if (!contexts.length) return;
-    await this.storage.remove(
-      contexts.map((context) => contextStorageKey(tabId, context.url)),
-    );
+    await this.mutations.run(async () => {
+      const contexts = await this.listForTab(tabId);
+      if (!contexts.length) return;
+      await this.storage.remove(
+        contexts.map((context) => contextStorageKey(tabId, context.url)),
+      );
+    });
   }
 }
 
@@ -231,14 +264,14 @@ export function mergeConversationMessages(
 }
 
 export class ConversationArchive {
-  private readonly writeQueues = new Map<string, Promise<void>>();
-
-  constructor(private readonly storage: StorageArea) {}
+  constructor(
+    private readonly storage: StorageArea,
+    private readonly mutations = new SerialTaskQueue(),
+  ) {}
 
   async save(context: PageContext): Promise<void> {
-    const key = conversationStorageKey(context.url);
-    const previous = this.writeQueues.get(key) ?? Promise.resolve();
-    const next = previous.catch(() => undefined).then(async () => {
+    await this.mutations.run(async () => {
+      const key = conversationStorageKey(context.url);
       const incoming = archivedMessages(context.messages);
       if (!incoming.length) return;
       const existing = await this.get(context.url);
@@ -257,12 +290,6 @@ export class ConversationArchive {
       };
       await this.storage.set({ [key]: conversation });
     });
-    this.writeQueues.set(key, next);
-    try {
-      await next;
-    } finally {
-      if (this.writeQueues.get(key) === next) this.writeQueues.delete(key);
-    }
   }
 
   async get(url: string): Promise<ArchivedConversation | null> {
@@ -322,23 +349,18 @@ export class ConversationArchive {
   }
 
   async delete(url: string): Promise<void> {
-    const key = conversationStorageKey(url);
-    await (this.writeQueues.get(key) ?? Promise.resolve()).catch(
-      () => undefined,
+    await this.mutations.run(() =>
+      this.storage.remove(conversationStorageKey(url)),
     );
-    await this.storage.remove(key);
   }
 
   async clear(): Promise<void> {
-    await Promise.all(
-      [...this.writeQueues.values()].map((pending) =>
-        pending.catch(() => undefined),
-      ),
-    );
-    const values = await this.storage.get(null);
-    const keys = Object.keys(values).filter((key) =>
-      key.startsWith(CONVERSATION_PREFIX),
-    );
-    if (keys.length) await this.storage.remove(keys);
+    await this.mutations.run(async () => {
+      const values = await this.storage.get(null);
+      const keys = Object.keys(values).filter((key) =>
+        key.startsWith(CONVERSATION_PREFIX),
+      );
+      if (keys.length) await this.storage.remove(keys);
+    });
   }
 }

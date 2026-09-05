@@ -1,16 +1,14 @@
 import { browser } from 'wxt/browser';
 
-import type { SettingsStore } from '../components/SettingsApp.tsx';
+import type { SettingsStore } from '../application/ports.ts';
+import { DEFAULT_SETTINGS } from '../application/settings.ts';
 import type { UserSettings } from '../core/types.ts';
 import type { StorageArea } from './context-repository.ts';
 import { sendRuntimeRequest } from './runtime-client.ts';
 
 export const SETTINGS_KEY = 'context-reader:settings';
 
-export const DEFAULT_SETTINGS: UserSettings = {
-  apiKey: '',
-  retainConversations: false,
-};
+export { DEFAULT_SETTINGS } from '../application/settings.ts';
 
 export function localStorageArea(): StorageArea {
   return {
@@ -34,11 +32,14 @@ export async function loadSettings(): Promise<UserSettings> {
   const result = await browser.storage.local.get(SETTINGS_KEY);
   const stored = result[SETTINGS_KEY] as Partial<UserSettings> | undefined;
   return {
-    apiKey: typeof stored?.apiKey === 'string' ? stored.apiKey : '',
+    apiKey:
+      typeof stored?.apiKey === 'string'
+        ? stored.apiKey
+        : DEFAULT_SETTINGS.apiKey,
     retainConversations:
       typeof stored?.retainConversations === 'boolean'
         ? stored.retainConversations
-        : false,
+        : DEFAULT_SETTINGS.retainConversations,
   };
 }
 
@@ -54,6 +55,6 @@ export class BrowserSettingsStore implements SettingsStore {
   }
 
   async clearConversations(): Promise<void> {
-    await sendRuntimeRequest<void>({ type: 'history:clear' });
+    await sendRuntimeRequest({ type: 'history:clear' });
   }
 }

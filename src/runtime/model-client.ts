@@ -69,9 +69,8 @@ async function fetchJson<T>(
 ): Promise<{ payload: T; response: Response }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  let response: Response;
   try {
-    response = await fetcher(endpoint, {
+    const response = await fetcher(endpoint, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -80,7 +79,23 @@ async function fetchJson<T>(
       body: JSON.stringify(body),
       signal: controller.signal,
     });
+
+    let payload = {} as T;
+    try {
+      payload = (await response.json()) as T;
+    } catch (cause) {
+      if (controller.signal.aborted) throw cause;
+      if (response.ok) {
+        throw new ModelClientError(
+          'INVALID_RESPONSE',
+          '模型服务返回了无法识别的响应。',
+          response.status,
+        );
+      }
+    }
+    return { payload, response };
   } catch (cause) {
+    if (cause instanceof ModelClientError) throw cause;
     if (controller.signal.aborted) {
       throw new ModelClientError(
         'REQUEST_TIMEOUT',
@@ -95,20 +110,6 @@ async function fetchJson<T>(
   } finally {
     clearTimeout(timeout);
   }
-
-  let payload = {} as T;
-  try {
-    payload = (await response.json()) as T;
-  } catch {
-    if (response.ok) {
-      throw new ModelClientError(
-        'INVALID_RESPONSE',
-        '模型服务返回了无法识别的响应。',
-        response.status,
-      );
-    }
-  }
-  return { payload, response };
 }
 
 function validateConfig(config: ModelConfig): void {

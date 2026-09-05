@@ -9,6 +9,7 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html'],
       include: [
+        'src/application/*.ts',
         'src/core/*.ts',
         'src/runtime/context-repository.ts',
         'src/runtime/model-client.ts',

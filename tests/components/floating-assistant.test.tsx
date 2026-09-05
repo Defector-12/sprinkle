@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   FloatingAssistant,
-  type FloatingAssistantBridge,
 } from '../../src/components/FloatingAssistant.tsx';
+import type { FloatingAssistantBridge } from '../../src/application/ports.ts';
 import type { ImageFocus, PageContext } from '../../src/core/types.ts';
 import { publishAssistantOpen } from '../../src/runtime/assistant-events.ts';
 
@@ -692,6 +692,41 @@ describe('FloatingAssistant', () => {
       '正在理解页面内容',
     );
     expect(screen.getByText('正在提取标题、段落和代码块')).toBeVisible();
+  });
+
+  it('ignores an older activation failure after a newer activation succeeds', async () => {
+    let rejectFirst: ((cause: Error) => void) | undefined;
+    let resolveSecond: ((context: PageContext) => void) | undefined;
+    const bridge = createBridge(unactivatedContext, {
+      activate: vi
+        .fn()
+        .mockReturnValueOnce(
+          new Promise<PageContext>((_resolve, reject) => {
+            rejectFirst = reject;
+          }),
+        )
+        .mockReturnValueOnce(
+          new Promise<PageContext>((resolve) => {
+            resolveSecond = resolve;
+          }),
+        ),
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+    await waitFor(() => expect(bridge.initialize).toHaveBeenCalledOnce());
+
+    act(() => publishAssistantOpen());
+    act(() => publishAssistantOpen());
+    await waitFor(() => expect(bridge.activate).toHaveBeenCalledTimes(2));
+
+    resolveSecond?.(readyContext);
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '页面内容已理解',
+    );
+    rejectFirst?.(new Error('旧请求已失效'));
+
+    await waitFor(() =>
+      expect(screen.queryByText('旧请求已失效')).not.toBeInTheDocument(),
+    );
   });
 
   it('explains when the API key is missing and disables questions', async () => {

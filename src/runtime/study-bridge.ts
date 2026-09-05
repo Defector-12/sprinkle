@@ -1,6 +1,9 @@
 import { browser } from 'wxt/browser';
 
-import type { StudyWorkspaceBridgeContract } from '../components/StudyWorkspace.tsx';
+import type {
+  StudyCaptureRect,
+  StudyWorkspaceBridgeContract,
+} from '../application/ports.ts';
 import type {
   ImageFocus,
   PageContext,
@@ -9,10 +12,7 @@ import type {
 } from '../core/types.ts';
 import { normalizePageUrl } from '../core/url.ts';
 import { extensionUrl } from './extension-url.ts';
-import {
-  isContextChangedEvent,
-  type StudyCaptureRect,
-} from './messages.ts';
+import { isContextChangedEvent } from './messages.ts';
 import { sendRuntimeRequest } from './runtime-client.ts';
 import {
   captureVisibleTabForSender,
@@ -48,14 +48,14 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
   constructor(private readonly target: StudyTarget) {}
 
   initialize(): Promise<PageContext> {
-    return sendRuntimeRequest<PageContext>({
+    return sendRuntimeRequest({
       type: 'study:context:get',
       ...this.target,
     });
   }
 
   ask(question: string): Promise<PageContext> {
-    return sendRuntimeRequest<PageContext>({
+    return sendRuntimeRequest({
       type: 'study:chat:ask',
       ...this.target,
       question,
@@ -63,7 +63,7 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
   }
 
   translate(text: string, section: string): Promise<string> {
-    return sendRuntimeRequest<string>({
+    return sendRuntimeRequest({
       type: 'study:translate',
       ...this.target,
       text,
@@ -77,7 +77,7 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
     scope?: TextFocus['scope'],
     headingLevel?: number,
   ): Promise<PageContext> {
-    return sendRuntimeRequest<PageContext>({
+    return sendRuntimeRequest({
       type: 'study:focus:set',
       ...this.target,
       focus: {
@@ -91,7 +91,7 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
   }
 
   setImageFocus(focus: ImageFocus): Promise<PageContext> {
-    return sendRuntimeRequest<PageContext>({
+    return sendRuntimeRequest({
       type: 'study:focus:set',
       ...this.target,
       focus,
@@ -99,7 +99,7 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
   }
 
   setRegionFocus(focus: RegionFocus): Promise<PageContext> {
-    return sendRuntimeRequest<PageContext>({
+    return sendRuntimeRequest({
       type: 'study:focus:set',
       ...this.target,
       focus,
@@ -107,7 +107,7 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
   }
 
   clearFocus(): Promise<PageContext> {
-    return sendRuntimeRequest<PageContext>({
+    return sendRuntimeRequest({
       type: 'study:focus:clear',
       ...this.target,
     });
@@ -158,14 +158,14 @@ export class StudyWorkspaceBridge implements StudyWorkspaceBridgeContract {
   }
 
   async openSource(): Promise<void> {
-    await sendRuntimeRequest<void>({
+    await sendRuntimeRequest({
       type: 'study:source:open',
       ...this.target,
     });
   }
 
   async openHistory(): Promise<void> {
-    await sendRuntimeRequest<void>({ type: 'history:open' });
+    await sendRuntimeRequest({ type: 'history:open' });
   }
 
   async open(): Promise<void> {

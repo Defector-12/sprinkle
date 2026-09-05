@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { browser } from 'wxt/browser';
 import { defineContentScript } from 'wxt/utils/define-content-script';
 
+import { SerialTaskQueue } from '../src/application/serial-task-queue.ts';
 import { FloatingAssistant } from '../src/components/FloatingAssistant.tsx';
 import {
   extractArticle,
@@ -25,6 +26,7 @@ import floatingAssistantCss from '../src/styles/floating-assistant.css?inline';
 
 const UI_ATTRIBUTE = 'data-context-reader-ui';
 const CONTENT_RUNTIME_KEY = '__contextReaderRuntimeMounted__';
+const screenshotQueue = new SerialTaskQueue();
 type RuntimeGlobal = typeof globalThis &
   Partial<Record<typeof CONTENT_RUNTIME_KEY, boolean>>;
 
@@ -343,7 +345,7 @@ function installTextSelection(openAssistant: () => void): () => void {
     hideToolbar();
     showTranslation('翻译中...', rect);
     try {
-      const result = await sendRuntimeRequest<string>({
+      const result = await sendRuntimeRequest({
         type: 'translate',
         text,
         section,
@@ -422,7 +424,7 @@ function mountFloatingAssistant(): MountedAssistant {
 
   const host = document.createElement('div');
   host.setAttribute(UI_ATTRIBUTE, 'assistant-root');
-  const shadow = host.attachShadow({ mode: 'open' });
+  const shadow = host.attachShadow({ mode: 'closed' });
   const style = document.createElement('style');
   style.textContent = floatingAssistantCss;
   const container = document.createElement('div');
@@ -472,7 +474,7 @@ function loadImage(source: string): Promise<HTMLImageElement> {
 }
 
 async function cropVisibleScreenshot(rect: DOMRect): Promise<string> {
-  const screenshot = await sendRuntimeRequest<string>({
+  const screenshot = await sendRuntimeRequest({
     type: 'capture:visible',
   });
   const source = await loadImage(screenshot);
@@ -533,17 +535,19 @@ function afterRepaint(): Promise<void> {
 }
 
 async function capturePageRegion(rect: DOMRect): Promise<string> {
-  const assistant = document.querySelector<HTMLElement>(
-    `[${UI_ATTRIBUTE}="assistant-root"]`,
-  );
-  const previousVisibility = assistant?.style.visibility ?? '';
-  if (assistant) assistant.style.visibility = 'hidden';
-  try {
-    await afterRepaint();
-    return await cropVisibleScreenshot(rect);
-  } finally {
-    if (assistant) assistant.style.visibility = previousVisibility;
-  }
+  return screenshotQueue.run(async () => {
+    const assistant = document.querySelector<HTMLElement>(
+      `[${UI_ATTRIBUTE}="assistant-root"]`,
+    );
+    const previousVisibility = assistant?.style.visibility ?? '';
+    if (assistant) assistant.style.visibility = 'hidden';
+    try {
+      await afterRepaint();
+      return await cropVisibleScreenshot(rect);
+    } finally {
+      if (assistant) assistant.style.visibility = previousVisibility;
+    }
+  });
 }
 
 async function quoteImage(

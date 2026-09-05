@@ -2,10 +2,8 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import {
-  SettingsApp,
-  type SettingsStore,
-} from '../../src/components/SettingsApp.tsx';
+import type { SettingsStore } from '../../src/application/ports.ts';
+import { SettingsApp } from '../../src/components/SettingsApp.tsx';
 
 function createStore(): SettingsStore {
   return {
@@ -74,5 +72,32 @@ describe('SettingsApp', () => {
 
     finishSave?.();
     expect(await screen.findByRole('status')).toHaveTextContent('设置已保存');
+  });
+
+  it('locks settings changes while conversations are being cleared', async () => {
+    let finishClear: (() => void) | undefined;
+    const store = createStore();
+    vi.mocked(store.clearConversations).mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishClear = resolve;
+      }),
+    );
+    render(<SettingsApp store={store} />);
+    const apiKey = await screen.findByLabelText('DeepSeek API Key');
+    const retention = screen.getByLabelText('保存学习记录');
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '清除全部学习记录' }),
+    );
+
+    expect(apiKey).toBeDisabled();
+    expect(retention).toBeDisabled();
+    expect(screen.getByRole('button', { name: '正在清除' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '保存设置' })).toBeDisabled();
+
+    finishClear?.();
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '学习记录已清除',
+    );
   });
 });

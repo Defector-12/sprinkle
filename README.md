@@ -113,8 +113,9 @@ entrypoints/
   library/            本地学习记录浏览与恢复
   options/            API Key 与隐私设置
 src/
+  application/        UI/runtime 契约、错误模型与并发协调
   components/         React 界面
-  core/               解析、检索、提示词和上下文状态
+  core/               解析、检索、统一提示词和上下文状态
   runtime/            存储、模型客户端与浏览器桥接
 docs/product/         MVP PRD
 tests/                核心、运行时和组件测试

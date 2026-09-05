@@ -145,6 +145,36 @@ describe('SessionContextRepository', () => {
     expect(updated.every((context) => context.messages.length === 0)).toBe(true);
     expect(updated.every((context) => context.article !== null)).toBe(true);
   });
+
+  it('serializes context updates so concurrent field changes are preserved', async () => {
+    const storage = new MemoryStorage();
+    const repository = new SessionContextRepository(storage);
+    const context = createContext(4, 'https://example.com/article');
+    await repository.save(context);
+
+    await Promise.all([
+      repository.update(4, context.url, (current) => ({
+        ...current,
+        focus: {
+          type: 'text',
+          text: 'Selected text',
+          section: 'Article',
+        },
+      })),
+      repository.update(4, context.url, (current) => ({
+        ...current,
+        warning: 'Updated warning',
+      })),
+    ]);
+
+    await expect(repository.get(4, context.url)).resolves.toMatchObject({
+      focus: {
+        type: 'text',
+        text: 'Selected text',
+      },
+      warning: 'Updated warning',
+    });
+  });
 });
 
 describe('ConversationArchive', () => {

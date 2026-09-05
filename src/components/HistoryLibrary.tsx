@@ -19,12 +19,12 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 
+import type { HistoryLibraryBridgeContract } from '../application/ports.ts';
 import type {
   ArchivedConversation,
   ConversationArchiveUsage,
   ConversationSummary,
 } from '../core/types.ts';
-import type { HistoryLibraryBridgeContract } from '../runtime/history-bridge.ts';
 import {
   AssistantMarkdown,
   messageAuthor,

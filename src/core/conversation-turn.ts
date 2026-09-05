@@ -23,3 +23,34 @@ export function completeQuestionTurn(
     updatedAt: Date.now(),
   };
 }
+
+export function failQuestionTurn(
+  answeringContext: PageContext,
+  questionId: string,
+): PageContext {
+  return {
+    ...answeringContext,
+    status: answeringContext.article?.isPartial ? 'partial' : 'ready',
+    messages: answeringContext.messages.map((message) =>
+      message.id === questionId ? { ...message, error: true } : message,
+    ),
+    updatedAt: Date.now(),
+  };
+}
+
+export function recoverInterruptedQuestionTurn(
+  context: PageContext,
+): PageContext {
+  if (context.status !== 'answering') return context;
+  const pendingQuestion = context.messages.findLast(
+    (message) => message.role === 'user',
+  );
+  if (!pendingQuestion) {
+    return {
+      ...context,
+      status: context.article?.isPartial ? 'partial' : 'ready',
+      updatedAt: Date.now(),
+    };
+  }
+  return failQuestionTurn(context, pendingQuestion.id);
+}

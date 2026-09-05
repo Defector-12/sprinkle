@@ -8,10 +8,8 @@ import {
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  StudyWorkspace,
-  type StudyWorkspaceBridgeContract,
-} from '../../src/components/StudyWorkspace.tsx';
+import type { StudyWorkspaceBridgeContract } from '../../src/application/ports.ts';
+import { StudyWorkspace } from '../../src/components/StudyWorkspace.tsx';
 import type { ImageFocus, PageContext } from '../../src/core/types.ts';
 
 const readyContext: PageContext = {
@@ -238,6 +236,46 @@ describe('StudyWorkspace', () => {
       screen.getByRole('button', { name: '学习记录' }),
     );
     expect(bridge.openHistory).toHaveBeenCalledOnce();
+  });
+
+  it('does not let a late initialization snapshot overwrite a newer event', async () => {
+    let resolveInitialize: ((context: PageContext) => void) | undefined;
+    let publishContext: ((context: PageContext) => void) | undefined;
+    const newerContext: PageContext = {
+      ...readyContext,
+      messages: [
+        ...readyContext.messages,
+        {
+          id: 'latest-answer',
+          role: 'assistant',
+          content: 'Newest synchronized answer',
+          createdAt: 2,
+        },
+      ],
+      updatedAt: 2,
+    };
+    const bridge = createBridge({
+      initialize: vi.fn(
+        () =>
+          new Promise<PageContext>((resolve) => {
+            resolveInitialize = resolve;
+          }),
+      ),
+      subscribe: vi.fn((listener: (context: PageContext) => void) => {
+        publishContext = listener;
+        return () => undefined;
+      }),
+    });
+    render(<StudyWorkspace bridge={bridge} />);
+    await waitFor(() => expect(bridge.subscribe).toHaveBeenCalledOnce());
+
+    act(() => publishContext?.(newerContext));
+    expect(await screen.findByText('Newest synchronized answer')).toBeVisible();
+    resolveInitialize?.(readyContext);
+
+    await waitFor(() =>
+      expect(screen.getByText('Newest synchronized answer')).toBeVisible(),
+    );
   });
 
   it('labels an image reference without exposing model routing', async () => {
@@ -473,6 +511,26 @@ describe('StudyWorkspace', () => {
     expect(bridge.setTextFocus).toHaveBeenCalledWith(
       'Working memory',
       'Architecture',
+    );
+  });
+
+  it('shows an error when selected text cannot be attached', async () => {
+    const bridge = createBridge({
+      setTextFocus: vi.fn().mockRejectedValue(new Error('原页面已关闭')),
+    });
+    render(<StudyWorkspace bridge={bridge} />);
+    const paragraph = await screen.findByText(
+      'Working memory carries the current reasoning state.',
+    );
+    mockTextSelection(paragraph);
+
+    fireEvent.mouseUp(paragraph);
+    await userEvent.click(
+      await screen.findByRole('button', { name: '提问选中文字' }),
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '原页面已关闭',
     );
   });
 
@@ -897,6 +955,26 @@ describe('StudyWorkspace', () => {
         '这个架构的主要取舍是什么？',
       ),
     );
+  });
+
+  it('keeps the draft while another view is answering', async () => {
+    const bridge = createBridge({
+      initialize: vi.fn().mockResolvedValue({
+        ...readyContext,
+        status: 'answering',
+      }),
+    });
+    render(<StudyWorkspace bridge={bridge} />);
+    const input = await screen.findByRole('textbox', {
+      name: '向当前资料提问',
+    });
+
+    await userEvent.type(input, '等当前回答结束后再发送');
+    expect(screen.getByRole('button', { name: '发送问题' })).toBeDisabled();
+    await userEvent.type(input, '{Enter}');
+
+    expect(bridge.ask).not.toHaveBeenCalled();
+    expect(input).toHaveValue('等当前回答结束后再发送');
   });
 
   it('scrolls the web conversation to its newest content after sending', async () => {

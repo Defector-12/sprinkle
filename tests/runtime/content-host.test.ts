@@ -17,6 +17,8 @@ it('uses a defined HTML element for the assistant shadow host', () => {
   expect(contentScript).not.toContain(
     "document.createElement('context-reader-assistant')",
   );
+  expect(contentScript).toContain("host.attachShadow({ mode: 'closed' })");
+  expect(contentScript).not.toContain("host.attachShadow({ mode: 'open' })");
 });
 
 it('provides compact selection actions and a draggable translation bubble', () => {

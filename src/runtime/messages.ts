@@ -7,56 +7,83 @@ import type {
   PageContext,
 } from '../core/types.ts';
 
-export interface StudyCaptureRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
+interface ExtensionRequestPayloadMap {
+  'context:get': Record<never, never>;
+  'context:activate': Record<never, never>;
+  'context:clear': Record<never, never>;
+  'chat:ask': { question: string };
+  translate: { text: string; section: string };
+  'study:open': Record<never, never>;
+  'study:context:get': { tabId: number; url: string };
+  'study:chat:ask': { tabId: number; url: string; question: string };
+  'study:translate': {
+    tabId: number;
+    url: string;
+    text: string;
+    section: string;
+  };
+  'study:focus:set': {
+    tabId: number;
+    url: string;
+    focus: FocusContext;
+  };
+  'study:focus:clear': { tabId: number; url: string };
+  'study:source:open': { tabId: number; url: string };
+  'picker:image:start': Record<never, never>;
+  'picker:region:start': Record<never, never>;
+  'focus:set': { focus: FocusContext };
+  'focus:clear': Record<never, never>;
+  'capture:visible': Record<never, never>;
+  'history:list': { query?: string };
+  'history:get': { url: string };
+  'history:delete': { url: string };
+  'history:clear': Record<never, never>;
+  'history:usage': Record<never, never>;
+  'history:open': Record<never, never>;
+  'history:continue': { url: string };
+  'settings:has-key': Record<never, never>;
+  'settings:open': Record<never, never>;
 }
 
-export type ExtensionRequest =
-  | { type: 'context:get' }
-  | { type: 'context:activate' }
-  | { type: 'context:clear' }
-  | { type: 'chat:ask'; question: string }
-  | { type: 'translate'; text: string; section: string }
-  | { type: 'study:open' }
-  | { type: 'study:context:get'; tabId: number; url: string }
-  | {
-      type: 'study:chat:ask';
-      tabId: number;
-      url: string;
-      question: string;
-    }
-  | {
-      type: 'study:translate';
-      tabId: number;
-      url: string;
-      text: string;
-      section: string;
-    }
-  | {
-      type: 'study:focus:set';
-      tabId: number;
-      url: string;
-      focus: FocusContext;
-    }
-  | { type: 'study:focus:clear'; tabId: number; url: string }
-  | { type: 'study:source:open'; tabId: number; url: string }
-  | { type: 'picker:image:start' }
-  | { type: 'picker:region:start' }
-  | { type: 'focus:set'; focus: FocusContext }
-  | { type: 'focus:clear' }
-  | { type: 'capture:visible' }
-  | { type: 'history:list'; query?: string }
-  | { type: 'history:get'; url: string }
-  | { type: 'history:delete'; url: string }
-  | { type: 'history:clear' }
-  | { type: 'history:usage' }
-  | { type: 'history:open' }
-  | { type: 'history:continue'; url: string }
-  | { type: 'settings:has-key' }
-  | { type: 'settings:open' };
+export interface ExtensionResponseMap {
+  'context:get': PageContext;
+  'context:activate': PageContext;
+  'context:clear': PageContext;
+  'chat:ask': PageContext;
+  translate: string;
+  'study:open': void;
+  'study:context:get': PageContext;
+  'study:chat:ask': PageContext;
+  'study:translate': string;
+  'study:focus:set': PageContext;
+  'study:focus:clear': PageContext;
+  'study:source:open': void;
+  'picker:image:start': void;
+  'picker:region:start': void;
+  'focus:set': PageContext;
+  'focus:clear': PageContext;
+  'capture:visible': string;
+  'history:list': ConversationSummary[];
+  'history:get': ArchivedConversation | null;
+  'history:delete': void;
+  'history:clear': void;
+  'history:usage': ConversationArchiveUsage;
+  'history:open': void;
+  'history:continue': void;
+  'settings:has-key': boolean;
+  'settings:open': void;
+}
+
+export type ExtensionRequestType = keyof ExtensionRequestPayloadMap;
+
+export type ExtensionRequest<
+  Type extends ExtensionRequestType = ExtensionRequestType,
+> = Type extends ExtensionRequestType
+  ? { type: Type } & ExtensionRequestPayloadMap[Type]
+  : never;
+
+export type ExtensionResponse<Request extends ExtensionRequest> =
+  ExtensionResponseMap[Request['type']];
 
 export type ContentRequest =
   | { type: 'page:extract' }

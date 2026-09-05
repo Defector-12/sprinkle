@@ -2,28 +2,19 @@ import { Check, Eye, EyeOff, KeyRound, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { SyntheticEvent } from 'react';
 
-import type { UserSettings } from '../core/types.ts';
-
-export interface SettingsStore {
-  load(): Promise<UserSettings>;
-  save(settings: UserSettings): Promise<void>;
-  clearConversations(): Promise<void>;
-}
+import type { SettingsStore } from '../application/ports.ts';
+import { DEFAULT_SETTINGS } from '../application/settings.ts';
 
 export interface SettingsAppProps {
   store: SettingsStore;
 }
-
-const DEFAULT_SETTINGS: UserSettings = {
-  apiKey: '',
-  retainConversations: false,
-};
 
 export function SettingsApp({ store }: SettingsAppProps) {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [showKey, setShowKey] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
 
@@ -48,6 +39,7 @@ export function SettingsApp({ store }: SettingsAppProps) {
 
   async function submit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (clearing) return;
     setSaving(true);
     setStatus('');
     setError('');
@@ -62,6 +54,8 @@ export function SettingsApp({ store }: SettingsAppProps) {
   }
 
   async function clearConversations() {
+    if (saving || clearing) return;
+    setClearing(true);
     setStatus('');
     setError('');
     try {
@@ -69,6 +63,8 @@ export function SettingsApp({ store }: SettingsAppProps) {
       setStatus('学习记录已清除');
     } catch {
       setError('清除失败，请重试');
+    } finally {
+      setClearing(false);
     }
   }
 
@@ -109,7 +105,7 @@ export function SettingsApp({ store }: SettingsAppProps) {
                   }
                   autoComplete="off"
                   spellCheck={false}
-                  disabled={!loaded || saving}
+                  disabled={!loaded || saving || clearing}
                   aria-describedby="api-key-help"
                 />
                 <button
@@ -121,6 +117,7 @@ export function SettingsApp({ store }: SettingsAppProps) {
                       : '显示 DeepSeek API Key'
                   }
                   onClick={() => setShowKey((current) => !current)}
+                  disabled={clearing}
                 >
                   {showKey ? (
                     <EyeOff size={17} aria-hidden="true" />
@@ -162,7 +159,7 @@ export function SettingsApp({ store }: SettingsAppProps) {
                     retainConversations: event.target.checked,
                   }))
                 }
-                disabled={!loaded || saving}
+                disabled={!loaded || saving || clearing}
               />
               <span aria-hidden="true" />
             </span>
@@ -172,10 +169,10 @@ export function SettingsApp({ store }: SettingsAppProps) {
             className="danger-button"
             type="button"
             onClick={() => void clearConversations()}
-            disabled={saving}
+            disabled={saving || clearing}
           >
             <Trash2 size={17} aria-hidden="true" />
-            清除全部学习记录
+            {clearing ? '正在清除' : '清除全部学习记录'}
           </button>
         </section>
 
@@ -196,7 +193,7 @@ export function SettingsApp({ store }: SettingsAppProps) {
           <button
             className="primary-button"
             type="submit"
-            disabled={!loaded || saving}
+            disabled={!loaded || saving || clearing}
           >
             {saving ? '保存中' : '保存设置'}
           </button>

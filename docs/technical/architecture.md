@@ -2,7 +2,7 @@
 
 > 技术栈：WXT 0.20 / React 19 / TypeScript 7 / Vitest 4 / MV3
 > 运行要求：Node.js 22.13+，pnpm 11
-> 当前基线：`main@f3b1bbf`，150 项测试，Chrome/Edge 构建通过
+> 当前基线以 `main` 分支和 `pnpm check` 结果为准，不在文档中维护易过期的 commit 与测试数量。
 
 本文是后续 Agent 的工程入口。产品行为以 [产品基线](../product/mvp-prd.md) 为准；README 用于安装和运行，不应承载架构决策。
 
@@ -41,7 +41,7 @@ FloatingAssistant / StudyWorkspace
 - 匹配所有 HTTP/HTTPS 页面，在 `document_idle` 挂载休眠助手。
 - 工具栏消息到达前不解析正文。
 - 承担 DOM 提取、选区定位、页面图片引用和可见区域裁剪。
-- UI 使用标准 `div` 作为 Shadow host。不要改回未注册自定义标签，否则 Reddit 的 `:not(:defined)` 会将整个插件设为 `visibility: hidden`。
+- UI 使用标准 `div` 作为 closed Shadow host。不要改回未注册自定义标签，否则 Reddit 的 `:not(:defined)` 会将整个插件设为 `visibility: hidden`。
 - 通过模块内私有事件打开 React 助手，严禁恢复为网页可伪造的公开 `window` 事件。
 
 ### `entrypoints/background.ts`
@@ -93,7 +93,8 @@ unactivated -> parsing -> ready | partial | failed
 ready | partial -> answering -> ready | partial
 ```
 
-`focus` 是下一问的临时引用。成功回答后清除；失败时保留以便重试。用户消息中的 `reference` 是发送瞬间的不可变快照。
+- session 与归档写操作共享串行队列；PageContext 的局部字段更新必须通过仓储的原子 `update`，整状态替换必须先校验 generation，避免旧快照覆盖并发变更。
+- `answering` 是可恢复的临时状态；service worker 重启后会将未完成问题标记为失败并恢复到可提问状态。
 
 ### 文章结构
 
@@ -155,6 +156,8 @@ article -> main -> [role="main"] -> body
 8. 无新引用时，`selectConversationHistory` 负责长期对话记忆。
 9. `buildModelRequest` 将 system policy 与不受信任的网页资料分离。
 10. Background 在请求前写入用户消息，成功后写入回答并消费 focus。
+
+所有模型 system/user prompt 模板统一位于 `src/core/prompts.ts`；调用方不得内联新增模型指令。
 
 全文型意图和首轮普通相关性在本地完成；困难问题会在用户提问后增加一次有上限的模型规划调用。底层仍不是 embedding。
 
@@ -228,6 +231,10 @@ VITE_MODEL_ID=deepseek-v4-flash-vision-exp
 
 | 模块 | 主要职责 |
 | --- | --- |
+| `src/application/ports.ts` | UI 与 runtime adapter 的稳定能力契约 |
+| `src/application/assistant-problems.ts` | 助手问题模型与错误映射 |
+| `src/application/serial-task-queue.ts` | session/local 存储写操作串行化 |
+| `src/core/prompts.ts` | 回答、翻译、查询规划 prompt 的唯一管理入口 |
 | `src/core/article-extractor.ts` | DOM 解析、结构恢复、诊断 |
 | `src/core/selection-focus.ts` | 判断划词目标是否为章节标题并保留原始标题层级 |
 | `src/core/retrieval.ts` | 文章切片、引用锚定、全文模式 |

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   completeQuestionTurn,
+  failQuestionTurn,
+  recoverInterruptedQuestionTurn,
   snapshotMessageReference,
 } from '../../src/core/conversation-turn.ts';
 import { buildModelRequest } from '../../src/core/model-request.ts';
@@ -115,5 +117,34 @@ describe('completeQuestionTurn', () => {
     expect(serialized).toContain(assistantMessage.content);
     expect(serialized).not.toContain('image_url');
     expect(serialized).not.toContain('data:image/jpeg');
+  });
+
+  it('marks a failed question and recovers an interrupted answering state', () => {
+    const answeringContext: PageContext = {
+      key: '7:https://example.com/agent-memory',
+      tabId: 7,
+      url: article.url,
+      normalizedUrl: article.url,
+      title: article.title,
+      status: 'answering',
+      article,
+      focus: null,
+      messages: [userMessage],
+      warning: null,
+      updatedAt: 1,
+    };
+
+    const failed = failQuestionTurn(answeringContext, userMessage.id);
+    const recovered = recoverInterruptedQuestionTurn(answeringContext);
+
+    expect(failed.status).toBe('ready');
+    expect(failed.messages[0]).toMatchObject({
+      id: userMessage.id,
+      error: true,
+    });
+    expect(recovered).toMatchObject({
+      status: 'ready',
+      messages: [{ id: userMessage.id, error: true }],
+    });
   });
 });

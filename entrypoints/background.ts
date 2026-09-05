@@ -1,8 +1,12 @@
 import { browser, type Browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
 
+import { OperationVersionTracker } from '../src/application/operation-version.ts';
+import { SerialTaskQueue } from '../src/application/serial-task-queue.ts';
 import {
   completeQuestionTurn,
+  failQuestionTurn,
+  recoverInterruptedQuestionTurn,
   snapshotMessageReference,
 } from '../src/core/conversation-turn.ts';
 import {
@@ -60,10 +64,18 @@ const modelClient = new OpenAiCompatibleModelClient({
     environment.VITE_MODEL_ID?.trim() ||
     'deepseek-v4-flash-vision-exp',
 });
-const contexts = new SessionContextRepository(sessionStorageArea());
-const conversations = new ConversationArchive(localStorageArea());
+const storageMutations = new SerialTaskQueue();
+const contexts = new SessionContextRepository(
+  sessionStorageArea(),
+  storageMutations,
+);
+const conversations = new ConversationArchive(
+  localStorageArea(),
+  storageMutations,
+);
 const pageGenerations = new Map<string, number>();
 const answeringPages = new Map<string, symbol>();
+const historyOperations = new OperationVersionTracker<string>();
 
 function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : '操作失败，请重试。';
@@ -106,6 +118,10 @@ function requireCurrentPageOperation(key: string, generation: number): void {
   if (currentPageGeneration(key) !== generation) {
     throw new StalePageOperationError('页面状态已更新，已忽略过期操作。');
   }
+}
+
+function historyKey(url: string): string {
+  return normalizePageUrl(url);
 }
 
 async function tabMatchesUrl(tabId: number, url: string): Promise<boolean> {
@@ -186,7 +202,14 @@ async function getOrCreateContext(tab: {
   title: string;
 }): Promise<PageContext> {
   const stored = await contexts.get(tab.id, tab.url);
-  if (stored) return stored;
+  if (stored) {
+    if (stored.status !== 'answering' || answeringPages.has(stored.key)) {
+      return stored;
+    }
+    const recovered = recoverInterruptedQuestionTurn(stored);
+    await contexts.save(recovered);
+    return recovered;
+  }
 
   let context = createPageContext(tab.id, tab.url, tab.title);
   const messages = await conversations.load(tab.url);
@@ -206,6 +229,7 @@ async function activatePage(tab: PageTab): Promise<PageContext> {
     warningDetail: null,
     updatedAt: Date.now(),
   };
+  requireCurrentPageOperation(operationKey, generation);
   await contexts.save(parsing);
   await notify(parsing);
 
@@ -215,6 +239,7 @@ async function activatePage(tab: PageTab): Promise<PageContext> {
     } satisfies ContentRequest)) as ArticleDocument;
     requireCurrentPageOperation(operationKey, generation);
     await requireMatchingTab(tab.id, tab.url);
+    requireCurrentPageOperation(operationKey, generation);
     const ready: PageContext = {
       ...parsing,
       title: article.title,
@@ -233,6 +258,7 @@ async function activatePage(tab: PageTab): Promise<PageContext> {
       await contexts.deletePage(tab.id, tab.url);
       throw cause;
     }
+    requireCurrentPageOperation(operationKey, generation);
     const detail = errorMessage(cause);
     const failed: PageContext = {
       ...parsing,
@@ -269,6 +295,7 @@ async function performAskPage(
   operationKey: string,
   generation: number,
 ): Promise<PageContext> {
+  const archiveVersion = historyOperations.snapshot(historyKey(tab.url));
   const current = await getOrCreateContext(tab);
   if (!current.article || !['ready', 'partial'].includes(current.status)) {
     throw new Error('请先读取当前页面，再发送问题。');
@@ -304,6 +331,8 @@ async function performAskPage(
     messages: [...current.messages, userMessage],
     updatedAt: Date.now(),
   };
+  await requireMatchingTab(tab.id, tab.url);
+  requireCurrentPageOperation(operationKey, generation);
   await contexts.save(withQuestion);
   await notify(withQuestion);
 
@@ -352,38 +381,50 @@ async function performAskPage(
     const answer = await modelClient.complete(settings.apiKey, request);
     requireCurrentPageOperation(operationKey, generation);
     await requireMatchingTab(tab.id, tab.url);
-    const latest = await contexts.get(tab.id, tab.url);
-    if (
-      !latest?.article ||
-      latest.status !== 'answering' ||
-      !latest.messages.some((item) => item.id === userMessage.id)
-    ) {
+    const completed = await contexts.update(
+      tab.id,
+      tab.url,
+      (latest) => {
+        requireCurrentPageOperation(operationKey, generation);
+        if (
+          !latest.article ||
+          latest.status !== 'answering' ||
+          !latest.messages.some((item) => item.id === userMessage.id)
+        ) {
+          throw new StalePageOperationError(
+            '页面状态已更新，已忽略过期回答。',
+          );
+        }
+        return completeQuestionTurn(
+          latest,
+          message('assistant', answer, 'deepseek'),
+        );
+      },
+    );
+    if (!completed) {
       throw new StalePageOperationError(
         '页面状态已更新，已忽略过期回答。',
       );
     }
-    const completed = completeQuestionTurn(
-      latest,
-      message('assistant', answer, 'deepseek'),
-    );
-    if (latest.updatedAt > withQuestion.updatedAt) {
-      completed.focus = latest.focus;
-    }
-    await contexts.save(completed);
     let finalized = completed;
     if (settings.retainConversations) {
       try {
-        await conversations.save(completed);
-        await notifyHistoryChanged();
+        requireCurrentPageOperation(operationKey, generation);
+        if (historyOperations.isCurrent(historyKey(tab.url), archiveVersion)) {
+          await conversations.save(completed);
+          await notifyHistoryChanged();
+        }
       } catch (cause) {
-        finalized = {
-          ...completed,
-          warning: [completed.warning, '回答已生成，但本地对话归档失败。']
-            .filter(Boolean)
-            .join('；'),
-          warningDetail: errorMessage(cause),
-        };
-        await contexts.save(finalized);
+        if (cause instanceof StalePageOperationError) throw cause;
+        finalized =
+          (await contexts.update(tab.id, tab.url, (latest) => ({
+            ...latest,
+            warning: [latest.warning, '回答已生成，但本地对话归档失败。']
+              .filter(Boolean)
+              .join('；'),
+            warningDetail: errorMessage(cause),
+            updatedAt: Date.now(),
+          }))) ?? completed;
       }
     }
     await notify(finalized);
@@ -397,12 +438,20 @@ async function performAskPage(
         '原页面已关闭或跳转，请在当前页面重新打开 Context Reader。',
       );
     }
-    const recovered: PageContext = {
-      ...withQuestion,
-      status: current.article.isPartial ? 'partial' : 'ready',
-      updatedAt: Date.now(),
-    };
-    await contexts.save(recovered);
+    const recovered = await contexts.update(tab.id, tab.url, (latest) => {
+      requireCurrentPageOperation(operationKey, generation);
+      if (!latest.messages.some((item) => item.id === userMessage.id)) {
+        throw new StalePageOperationError(
+          '页面状态已更新，已忽略过期回答。',
+        );
+      }
+      return failQuestionTurn(latest, userMessage.id);
+    });
+    if (!recovered) {
+      throw new StalePageOperationError(
+        '页面状态已更新，已忽略过期回答。',
+      );
+    }
     await notify(recovered);
     throw cause;
   }
@@ -505,29 +554,41 @@ async function setFocusFromPage(
   if (!sender.tab?.id || !isSupportedUrl(sender.tab.url)) {
     throw new Error('无法识别内容所在页面。');
   }
-  const current = await getOrCreateContext({
+  await getOrCreateContext({
     id: sender.tab.id,
     url: sender.tab.url,
     title: sender.tab.title || new URL(sender.tab.url).hostname,
   });
-  const updated: PageContext = {
-    ...current,
-    focus,
-    updatedAt: Date.now(),
-  };
-  await contexts.save(updated);
+  const updated = await contexts.update(
+    sender.tab.id,
+    sender.tab.url,
+    (current) => {
+      if (
+        !current.article ||
+        !['ready', 'partial', 'answering'].includes(current.status)
+      ) {
+        throw new Error('请先读取当前页面。');
+      }
+      return {
+        ...current,
+        focus,
+        updatedAt: Date.now(),
+      };
+    },
+  );
+  if (!updated) throw new Error('当前页面上下文已失效，请重新理解页面。');
   await notify(updated);
   return updated;
 }
 
 async function clearFocus(tab: PageTab): Promise<PageContext> {
-  const current = await getOrCreateContext(tab);
-  const updated: PageContext = {
+  await getOrCreateContext(tab);
+  const updated = await contexts.update(tab.id, tab.url, (current) => ({
     ...current,
     focus: null,
     updatedAt: Date.now(),
-  };
-  await contexts.save(updated);
+  }));
+  if (!updated) throw new Error('当前页面上下文已失效，请重新理解页面。');
   await notify(updated);
   return updated;
 }
@@ -549,13 +610,23 @@ async function setStudyFocus(
   url: string,
   focus: FocusContext | null,
 ): Promise<PageContext> {
-  const current = await studyContext(tabId, url);
-  const updated: PageContext = {
-    ...current,
-    focus,
-    updatedAt: Date.now(),
-  };
-  await contexts.save(updated);
+  await studyContext(tabId, url);
+  const updated = await contexts.update(tabId, url, (current) => {
+    if (
+      !current.article ||
+      !['ready', 'partial', 'answering'].includes(current.status)
+    ) {
+      throw new Error('原页面上下文已失效，请返回原页面重新打开学习工作台。');
+    }
+    return {
+      ...current,
+      focus,
+      updatedAt: Date.now(),
+    };
+  });
+  if (!updated) {
+    throw new Error('原页面上下文已失效，请返回原页面重新打开学习工作台。');
+  }
   await notify(updated);
   return updated;
 }
@@ -578,23 +649,25 @@ async function openHistory(): Promise<void> {
 }
 
 async function clearArchivedConversation(url: string): Promise<void> {
+  historyOperations.invalidate(historyKey(url));
   const matching = await contexts.listForUrl(url);
   for (const context of matching) {
     invalidatePageOperations(createPageKey(context.tabId, context.url));
   }
-  await conversations.delete(url);
   const updated = await contexts.replaceMessagesForUrl(url, []);
+  await conversations.delete(url);
   await Promise.all(updated.map(notify));
   await notifyHistoryChanged();
 }
 
 async function clearArchivedConversations(): Promise<void> {
+  historyOperations.invalidateAll();
   const activeContexts = await contexts.listAll();
   for (const context of activeContexts) {
     invalidatePageOperations(createPageKey(context.tabId, context.url));
   }
-  await conversations.clear();
   const updated = await contexts.clearAllMessages();
+  await conversations.clear();
   await Promise.all(updated.map(notify));
   await notifyHistoryChanged();
 }
@@ -602,14 +675,34 @@ async function clearArchivedConversations(): Promise<void> {
 async function hydrateArchivedMessages(
   context: PageContext,
 ): Promise<PageContext> {
+  const key = historyKey(context.url);
+  const version = historyOperations.snapshot(key);
   const archived = await conversations.load(context.url);
-  if (!archived.length || context.status === 'answering') return context;
-  const messages = mergeConversationMessages(
-    archived,
-    context.messages,
+  if (
+    !archived.length ||
+    context.status === 'answering' ||
+    !historyOperations.isCurrent(key, version)
+  ) {
+    return context;
+  }
+  const updated = await contexts.update(
+    context.tabId,
+    context.url,
+    (latest) => {
+      if (
+        latest.status === 'answering' ||
+        !historyOperations.isCurrent(key, version)
+      ) {
+        return latest;
+      }
+      return {
+        ...latest,
+        messages: mergeConversationMessages(archived, latest.messages),
+        updatedAt: Date.now(),
+      };
+    },
   );
-  const updated = { ...context, messages };
-  await contexts.save(updated);
+  if (!updated) return context;
   await notify(updated);
   return updated;
 }
@@ -864,19 +957,30 @@ export default defineBackground(() => {
   );
 
   browser.tabs.onRemoved.addListener((tabId) => {
+    const archiveCheckpoint = historyOperations.checkpoint();
     void (async () => {
-      const tabContexts = await contexts.listForTab(tabId);
-      const settings = await loadSettings();
-      if (settings.retainConversations) {
-        await Promise.all(
-          tabContexts
-            .filter((context) => context.messages.length > 0)
-            .map((context) => conversations.save(context)),
-        );
-        await notifyHistoryChanged();
+      try {
+        const tabContexts = await contexts.listForTab(tabId);
+        const settings = await loadSettings();
+        const archivable = tabContexts.filter((context) => {
+          if (!settings.retainConversations || !context.messages.length) {
+            return false;
+          }
+          return historyOperations.isCheckpointCurrent(
+            historyKey(context.url),
+            archiveCheckpoint,
+          );
+        });
+        if (archivable.length) {
+          await Promise.all(
+            archivable.map((context) => conversations.save(context)),
+          );
+          await notifyHistoryChanged();
+        }
+      } finally {
+        await contexts.deleteTab(tabId);
       }
-      await contexts.deleteTab(tabId);
-    })();
+    })().catch(() => undefined);
   });
 
   browser.storage.onChanged.addListener((changes, areaName) => {
@@ -889,12 +993,19 @@ export default defineBackground(() => {
       | { retainConversations?: boolean }
       | undefined;
     if (previous?.retainConversations || !next?.retainConversations) return;
+    const archiveCheckpoint = historyOperations.checkpoint();
     void (async () => {
       const activeContexts = await contexts.listAll();
+      const archivable = activeContexts.filter((context) => {
+        if (!context.messages.length) return false;
+        return historyOperations.isCheckpointCurrent(
+          historyKey(context.url),
+          archiveCheckpoint,
+        );
+      });
+      if (!archivable.length) return;
       await Promise.all(
-        activeContexts
-          .filter((context) => context.messages.length > 0)
-          .map((context) => conversations.save(context)),
+        archivable.map((context) => conversations.save(context)),
       );
       await notifyHistoryChanged();
     })().catch(() => undefined);

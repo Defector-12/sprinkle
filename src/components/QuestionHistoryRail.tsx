@@ -44,7 +44,7 @@ export function QuestionHistoryRail({
   const questions = useMemo<QuestionHistoryItem[]>(
     () =>
       messages
-        .filter((message) => message.role === 'user')
+        .filter((message) => message.role === 'user' && !message.error)
         .map((message) => ({
           id: message.id,
           text: message.content.replace(/\s+/g, ' ').trim(),
@@ -71,9 +71,14 @@ export function QuestionHistoryRail({
     const updateActiveQuestion = () => {
       const bounds = container.getBoundingClientRect();
       const readingLine = bounds.top + bounds.height * 0.32;
+      const elements = new Map(
+        Array.from(
+          container.querySelectorAll<HTMLElement>('[data-question-id]'),
+        ).map((element) => [element.dataset.questionId, element]),
+      );
       let currentId = questions[0]?.id ?? null;
       for (const question of questions) {
-        const element = questionElement(container, question.id);
+        const element = elements.get(question.id);
         if (!element || element.getBoundingClientRect().top > readingLine) {
           break;
         }

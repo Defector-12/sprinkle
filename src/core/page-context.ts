@@ -21,3 +21,10 @@ export function createPageContext(
     updatedAt: Date.now(),
   };
 }
+
+export function canAskPage(context: PageContext | null): boolean {
+  return Boolean(
+    context?.article &&
+      (context.status === 'ready' || context.status === 'partial'),
+  );
+}
