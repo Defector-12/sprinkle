@@ -1,5 +1,6 @@
 @import "./message-content.css";
 @import "./question-history.css";
+@import "./responsive-question-trace.css";
 
 :root {
   --study-ink: oklch(23% 0.017 67);

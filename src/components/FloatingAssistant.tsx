@@ -55,6 +55,7 @@ import {
 } from './local-image.ts';
 import { QuestionHistoryRail } from './QuestionHistoryRail.tsx';
 import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
+import { useConversationAutoScroll } from './use-conversation-auto-scroll.ts';
 import { useStreamedAnswer } from './use-streamed-answer.ts';
 
 export interface FloatingAssistantProps {
@@ -485,6 +486,15 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
   } | null>(null);
   const draggedRef = useRef(false);
   const layout = dialogLayout(orbPos, dialogSize, dialogPosition);
+  const { resumeFollowing, scrollIntentHandlers } =
+    useConversationAutoScroll({
+      containerRef: messagesRef,
+      endRef: messagesEndRef,
+      enabled: isOpen && !isComposerMaximized,
+      messagesVersion: context?.messages,
+      streamingId: streamingTarget?.id,
+      revealedCount,
+    });
   useAutoGrowTextarea(inputRef, question, isComposerMaximized, 64);
 
   function reportProblem(
@@ -688,26 +698,11 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
     inputRef.current?.focus();
   }, [isComposerMaximized, isOpen]);
 
-  useEffect(() => {
-    if (!isOpen || isComposerMaximized) return;
-    messagesEndRef.current?.scrollIntoView?.({
-      behavior: 'smooth',
-      block: 'end',
-    });
-  }, [context?.messages, isComposerMaximized, isOpen]);
-
-  useEffect(() => {
-    if (!isOpen || isComposerMaximized || !streamingTarget) return;
-    messagesEndRef.current?.scrollIntoView?.({
-      behavior: 'auto',
-      block: 'end',
-    });
-  }, [isComposerMaximized, isOpen, revealedCount, streamingTarget]);
-
   async function sendQuestion() {
     const value = question.trim();
     if (!value || isSending || isUploadingImage) return;
 
+    resumeFollowing();
     setIsSending(true);
     waitForAnswer(context);
     setError(null);
@@ -1327,6 +1322,7 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
                 ref={messagesRef}
                 className="cr-messages"
                 aria-label="当前页面对话"
+                {...scrollIntentHandlers}
               >
                 {context.messages.map((message) => {
                   const isStreaming = isMessageStreaming(message);

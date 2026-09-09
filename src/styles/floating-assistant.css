@@ -6,6 +6,7 @@
 
 @import "./message-content.css";
 @import "./question-history.css";
+@import "./responsive-question-trace.css";
 
 :host {
   all: initial;

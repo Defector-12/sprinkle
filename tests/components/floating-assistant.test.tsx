@@ -103,6 +103,7 @@ function createBridge(
 
 describe('FloatingAssistant', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -515,6 +516,59 @@ describe('FloatingAssistant', () => {
         block: 'end',
       }),
     );
+  });
+
+  it('keeps rendering an answer after user scrolling pauses auto-follow', async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const answer = '这段回答会继续完整输出，但不会拉走当前阅读位置。';
+    const answeredContext: PageContext = {
+      ...readyContext,
+      messages: [
+        {
+          id: 'user-scroll',
+          role: 'user',
+          content: '继续解释',
+          createdAt: 1,
+        },
+        {
+          id: 'assistant-scroll',
+          role: 'assistant',
+          content: answer,
+          createdAt: 2,
+          answeredBy: 'deepseek',
+        },
+      ],
+    };
+    const bridge = createBridge(readyContext, {
+      ask: vi.fn().mockResolvedValue(answeredContext),
+    });
+    render(<FloatingAssistant bridge={bridge} />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: '打开 Context Reader' }),
+    );
+    const input = screen.getByRole('textbox', { name: '向当前文章提问' });
+
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(input, { target: { value: '继续解释' } });
+      fireEvent.click(screen.getByRole('button', { name: '发送问题' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const messages = screen.getByRole('list', { name: '当前页面对话' });
+    fireEvent.wheel(messages, { deltaY: -120 });
+    scrollIntoView.mockClear();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(screen.getByText(answer)).toBeVisible();
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
   it('auto-grows and maximizes the composer while Enter inserts a newline', async () => {

@@ -46,6 +46,7 @@ import {
 } from './local-image.ts';
 import { QuestionHistoryRail } from './QuestionHistoryRail.tsx';
 import { useAutoGrowTextarea } from './use-auto-grow-textarea.ts';
+import { useConversationAutoScroll } from './use-conversation-auto-scroll.ts';
 import { useStreamedAnswer } from './use-streamed-answer.ts';
 
 export interface StudyWorkspaceProps {
@@ -367,6 +368,15 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
   } | null>(null);
   const translationVisible = translation !== null;
   const canAsk = canAskPage(context);
+  const { resumeFollowing, scrollIntentHandlers } =
+    useConversationAutoScroll({
+      containerRef: messagesRef,
+      endRef: messagesEndRef,
+      enabled: !isComposerMaximized,
+      messagesVersion: context?.messages,
+      streamingId: streamingTarget?.id,
+      revealedCount,
+    });
   useAutoGrowTextarea(inputRef, question, isComposerMaximized, 92);
 
   useEffect(() => {
@@ -418,22 +428,6 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
       unsubscribe();
     };
   }, [acceptAnswer, bridge]);
-
-  useEffect(() => {
-    if (isComposerMaximized) return;
-    messagesEndRef.current?.scrollIntoView?.({
-      behavior: 'smooth',
-      block: 'end',
-    });
-  }, [context?.messages, isComposerMaximized]);
-
-  useEffect(() => {
-    if (isComposerMaximized || !streamingTarget) return;
-    messagesEndRef.current?.scrollIntoView?.({
-      behavior: 'auto',
-      block: 'end',
-    });
-  }, [isComposerMaximized, revealedCount, streamingTarget]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -686,6 +680,7 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
   async function sendQuestion() {
     const value = question.trim();
     if (!value || busy || !canAsk) return;
+    resumeFollowing();
     setBusy(true);
     waitForAnswer(context);
     setError(null);
@@ -1163,6 +1158,7 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
             ref={messagesRef}
             className="study-messages"
             aria-label="当前资料对话"
+            {...scrollIntentHandlers}
           >
             {context.messages.length === 0 && (
               <li className="study-messages__empty">

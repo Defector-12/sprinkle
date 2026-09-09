@@ -1022,6 +1022,59 @@ describe('StudyWorkspace', () => {
     );
   });
 
+  it('keeps rendering an answer after user scrolling pauses auto-follow', async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const answer = 'The answer keeps rendering without moving the reading position.';
+    const answeredContext: PageContext = {
+      ...readyContext,
+      messages: [
+        ...readyContext.messages,
+        {
+          id: 'user-scroll',
+          role: 'user',
+          content: 'Explain further.',
+          createdAt: 2,
+        },
+        {
+          id: 'assistant-scroll',
+          role: 'assistant',
+          content: answer,
+          createdAt: 3,
+          answeredBy: 'deepseek',
+        },
+      ],
+    };
+    const bridge = createBridge({
+      ask: vi.fn().mockResolvedValue(answeredContext),
+    });
+    render(<StudyWorkspace bridge={bridge} />);
+    const input = await screen.findByRole('textbox', {
+      name: '向当前资料提问',
+    });
+
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'Explain further.' } });
+      fireEvent.click(screen.getByRole('button', { name: '发送问题' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const messages = screen.getByRole('list', { name: '当前资料对话' });
+    fireEvent.wheel(messages, { deltaY: -120 });
+    scrollIntoView.mockClear();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(screen.getByText(answer)).toBeVisible();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
   it('auto-grows and maximizes the web composer while Enter inserts a newline', async () => {
     const bridge = createBridge();
     render(<StudyWorkspace bridge={bridge} />);

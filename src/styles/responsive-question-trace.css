@@ -1,0 +1,14 @@
+.question-trace {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.study-message--user.study-message--traced {
+  width: 92%;
+  max-width: 92%;
+}
+
+.study-message--user.study-message--traced > .message-plain {
+  max-width: min(78%, 520px);
+}
