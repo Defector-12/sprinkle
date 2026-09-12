@@ -30,6 +30,7 @@ import {
   messageAuthor,
   MessageReferenceCard,
 } from './MessageContent.tsx';
+import { QuestionHistoryRail } from './QuestionHistoryRail.tsx';
 
 export interface HistoryLibraryProps {
   bridge: HistoryLibraryBridgeContract;
@@ -83,6 +84,7 @@ export function HistoryLibrary({ bridge }: HistoryLibraryProps) {
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
   const layoutRef = useRef<HTMLElement>(null);
+  const messagesRef = useRef<HTMLOListElement>(null);
   const dividerDragging = useRef(false);
 
   useEffect(
@@ -471,22 +473,35 @@ export function HistoryLibrary({ bridge }: HistoryLibraryProps) {
                 </div>
               </header>
 
-              <ol className="library-messages" aria-label="历史问答">
-                {conversation.messages.map((message) => (
-                  <li
-                    key={message.id}
-                    className={`library-message library-message--${message.role}`}
-                  >
-                    <span>{messageAuthor(message)}</span>
-                    <MessageReferenceCard reference={message.reference} />
-                    {message.role === 'assistant' ? (
-                      <AssistantMarkdown content={message.content} />
-                    ) : (
-                      <p>{message.content}</p>
-                    )}
-                  </li>
-                ))}
-              </ol>
+              <div className="library-conversation">
+                <ol
+                  ref={messagesRef}
+                  className="library-messages"
+                  aria-label="历史问答"
+                >
+                  {conversation.messages.map((message) => (
+                    <li
+                      key={message.id}
+                      className={`library-message library-message--${message.role}`}
+                      data-question-id={
+                        message.role === 'user' ? message.id : undefined
+                      }
+                    >
+                      <span>{messageAuthor(message)}</span>
+                      <MessageReferenceCard reference={message.reference} />
+                      {message.role === 'assistant' ? (
+                        <AssistantMarkdown content={message.content} />
+                      ) : (
+                        <p>{message.content}</p>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+                <QuestionHistoryRail
+                  messages={conversation.messages}
+                  scrollContainerRef={messagesRef}
+                />
+              </div>
             </>
           ) : (
             <div className="library-detail-state">

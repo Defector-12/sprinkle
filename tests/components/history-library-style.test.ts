@@ -31,4 +31,17 @@ describe('history library visual surface', () => {
       /\.library-message--assistant\s*\{[^}]*border-left:/s,
     );
   });
+
+  it('keeps question history beside an independently scrolling conversation', () => {
+    expect(css).toContain('@import "./question-history.css"');
+    expect(css).toMatch(
+      /\.library-conversation\s*\{[^}]*position: relative;[^}]*overflow: hidden;/s,
+    );
+    expect(css).toMatch(
+      /\.library-messages\s*\{[^}]*height: 100%;[^}]*overflow-y: auto;/s,
+    );
+    expect(css).toContain(
+      '.library-conversation .question-history[data-expanded="true"]',
+    );
+  });
 });

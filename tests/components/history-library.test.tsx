@@ -47,6 +47,31 @@ const summary: ConversationSummary = {
   questionCount: 1,
   lastQuestion: 'What is durable memory?',
 };
+const conversationWithHistory: ArchivedConversation = {
+  ...conversation,
+  messages: [
+    ...conversation.messages,
+    {
+      id: 'question-2',
+      role: 'user',
+      content: 'How is memory retrieved?',
+      createdAt: 3,
+    },
+    {
+      id: 'answer-2',
+      role: 'assistant',
+      content: 'Relevant memories are selected for the current question.',
+      createdAt: 4,
+      answeredBy: 'deepseek',
+    },
+    {
+      id: 'question-3',
+      role: 'user',
+      content: 'When should memory expire?',
+      createdAt: 5,
+    },
+  ],
+};
 
 function createBridge(
   overrides: Partial<HistoryLibraryProps['bridge']> = {},
@@ -98,6 +123,40 @@ describe('HistoryLibrary', () => {
     );
 
     expect(bridge.continue).toHaveBeenCalledWith(url);
+  });
+
+  it('shows compact question history and jumps to a selected question', async () => {
+    const bridge = createBridge({
+      get: vi.fn().mockResolvedValue(conversationWithHistory),
+    });
+    render(<HistoryLibrary bridge={bridge} />);
+
+    expect(
+      await screen.findByRole('navigation', {
+        name: '问题历史，共 3 个问题',
+      }),
+    ).toBeVisible();
+    const messages = screen.getByRole('list', { name: '历史问答' });
+    const target = messages.querySelector<HTMLElement>(
+      '[data-question-id="question-2"]',
+    );
+    if (!target) throw new Error('Question target is missing');
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(target, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: '第 2 个问题：How is memory retrieved?',
+      }),
+    );
+
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      behavior: 'smooth',
+      block: 'center',
+    });
   });
 
   it('requires confirmation before deleting a saved conversation', async () => {

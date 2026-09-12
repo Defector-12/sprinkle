@@ -1,4 +1,5 @@
 @import "./message-content.css";
+@import "./question-history.css";
 
 :root {
   --library-ink: oklch(23% 0.018 72);
@@ -327,10 +328,16 @@ body {
 }
 
 .library-detail {
+  display: grid;
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
   background: var(--library-canvas);
+}
+
+.library-detail > .library-detail-state {
+  grid-row: 1 / -1;
 }
 
 .library-detail__header {
@@ -404,13 +411,41 @@ body {
   background: var(--library-accent-dark);
 }
 
+.library-conversation {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.library-conversation .question-history {
+  --question-history-bg: oklch(99% 0.004 85 / 97%);
+  --question-history-border: var(--library-line);
+  --question-history-text: var(--library-ink);
+  --question-history-muted: var(--library-muted);
+  --question-history-hover: var(--library-accent-soft);
+  --question-history-active: var(--library-accent);
+  right: 10px;
+}
+
+.library-conversation .question-history[data-expanded="true"] {
+  width: min(200px, calc(100% - 20px));
+}
+
 .library-messages {
   display: grid;
   width: min(820px, calc(100% - 40px));
+  height: 100%;
+  min-height: 0;
+  align-content: start;
   margin: 0 auto;
   gap: 18px;
-  padding: 32px 0 80px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 32px 28px 80px 0;
   list-style: none;
+  scrollbar-color: var(--library-line-strong) transparent;
+  scrollbar-width: thin;
 }
 
 .library-message {
