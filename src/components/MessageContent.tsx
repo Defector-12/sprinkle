@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import type { ChatMessage, MessageReference } from '../core/types.ts';
+import { normalizeAssistantMarkdown } from './assistant-markdown.ts';
 
 export function messageAuthor(message: ChatMessage): string {
   if (message.role === 'user') return '你';
@@ -40,7 +41,7 @@ export function AssistantMarkdown({
           ),
         }}
       >
-        {content}
+        {normalizeAssistantMarkdown(content)}
       </ReactMarkdown>
       {busy && caretClassName && (
         <span className={caretClassName} aria-hidden="true" />

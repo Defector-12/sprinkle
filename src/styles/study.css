@@ -679,6 +679,9 @@ textarea:focus-visible,
   margin: 0;
   font-size: 14px;
   line-height: 1.75;
+}
+
+.study-message > .message-plain {
   white-space: pre-wrap;
 }
 

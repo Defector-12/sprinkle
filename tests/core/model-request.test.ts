@@ -54,6 +54,9 @@ describe('buildModelRequest', () => {
     expect(request.messages[0]?.content).toContain(
       '不得切换到其他相似章节',
     );
+    expect(request.messages[0]?.content).toContain(
+      '列表标记与内容必须写在同一行',
+    );
     expect(request.messages[0]?.content).toContain('不要提供原文出处');
     expect(request.messages[0]?.content).not.toContain(
       'Short-term memory keeps the current task state.',

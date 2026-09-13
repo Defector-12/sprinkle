@@ -3,6 +3,7 @@
   overflow-wrap: anywhere;
   font-size: inherit;
   line-height: 1.7;
+  white-space: normal;
 }
 
 .message-markdown > :first-child {
@@ -48,6 +49,20 @@
 
 .message-markdown li + li {
   margin-top: 0.3em;
+}
+
+.message-markdown li > p {
+  margin: 0;
+}
+
+.message-markdown li > p + p {
+  margin-top: 0.45em;
+}
+
+.message-markdown li > ul,
+.message-markdown li > ol {
+  margin-top: 0.3em;
+  margin-bottom: 0;
 }
 
 .message-markdown blockquote {
