@@ -62,7 +62,7 @@ const modelClient = new OpenAiCompatibleModelClient({
     'https://api.deepseek.com/chat/completions',
   model:
     environment.VITE_MODEL_ID?.trim() ||
-    'deepseek-v4-flash-vision-exp',
+    'deepseek-flash',
 });
 const storageMutations = new SerialTaskQueue();
 const contexts = new SessionContextRepository(

@@ -200,7 +200,7 @@ describe('OpenAiCompatibleModelClient', () => {
     const client = new OpenAiCompatibleModelClient(
       {
         endpoint: 'https://api.deepseek.com/chat/completions',
-        model: 'deepseek-v4-flash-vision-exp',
+        model: 'deepseek-flash',
       },
       fetcher,
     );
@@ -211,7 +211,7 @@ describe('OpenAiCompatibleModelClient', () => {
 
     const body = JSON.parse(fetcher.mock.calls[0]?.[1]?.body as string);
     expect(body).toEqual({
-      model: 'deepseek-v4-flash-vision-exp',
+      model: 'deepseek-flash',
       messages: imageRequest.messages,
       stream: false,
     });

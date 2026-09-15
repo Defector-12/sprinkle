@@ -201,7 +201,7 @@ article -> main -> [role="main"] -> body
 
 ```text
 VITE_MODEL_API_URL=https://api.deepseek.com/chat/completions
-VITE_MODEL_ID=deepseek-v4-flash-vision-exp
+VITE_MODEL_ID=deepseek-flash
 ```
 
 - 用户只提供一个 DeepSeek API Key。

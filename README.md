@@ -62,7 +62,7 @@ pnpm dev
 
 ```bash
 VITE_MODEL_API_URL=https://api.deepseek.com/chat/completions
-VITE_MODEL_ID=deepseek-v4-flash-vision-exp
+VITE_MODEL_ID=deepseek-flash
 ```
 
 这些值会进入浏览器扩展包，只能用于公开的接口地址和模型标识。DeepSeek API Key 不得写入环境变量或源码，由用户在扩展设置页输入。
