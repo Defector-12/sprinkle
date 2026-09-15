@@ -492,7 +492,7 @@ export function HistoryLibrary({ bridge }: HistoryLibraryProps) {
                       {message.role === 'assistant' ? (
                         <AssistantMarkdown content={message.content} />
                       ) : (
-                        <p>{message.content}</p>
+                        <p className="message-plain">{message.content}</p>
                       )}
                     </li>
                   ))}

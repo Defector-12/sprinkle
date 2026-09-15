@@ -12,6 +12,8 @@
   --library-accent-dark: oklch(50% 0.16 40);
   --library-accent-soft: oklch(93% 0.038 48);
   --library-danger: oklch(54% 0.18 28);
+  --message-selection-bg: var(--library-accent-dark);
+  --message-selection-color: white;
   color: var(--library-ink);
   background: var(--library-canvas);
 }

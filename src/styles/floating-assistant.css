@@ -27,6 +27,8 @@
   --cr-color-focus: oklch(52% 0.18 250);
   --cr-color-focus-ring: oklch(52% 0.18 250 / 12%);
   --cr-color-overlay: oklch(18% 0.01 70 / 14%);
+  --message-selection-bg: var(--cr-color-accent);
+  --message-selection-color: var(--cr-color-accent-ink);
   --cr-font-ui:
     -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Microsoft YaHei", sans-serif;

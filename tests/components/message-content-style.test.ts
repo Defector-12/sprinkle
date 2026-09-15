@@ -6,6 +6,38 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('shared message content visual surface', () => {
+  it('keeps message text selectable with an explicit visible highlight', () => {
+    const messageCss = readFileSync(
+      new URL('../../src/styles/message-content.css', import.meta.url),
+      'utf8',
+    );
+    const selectableRule =
+      messageCss.match(
+        /\.message-plain,\s*\.message-reference,[\s\S]*?\.message-markdown \*\s*\{([\s\S]*?)\}/,
+      )?.[1] ?? '';
+    const selectionRule =
+      messageCss.match(
+        /\.message-plain::selection,[\s\S]*?\.message-markdown \*::selection\s*\{([\s\S]*?)\}/,
+      )?.[1] ?? '';
+
+    expect(selectableRule).toContain('user-select: text');
+    expect(selectionRule).toContain('--message-selection-bg');
+    expect(selectionRule).toContain('--message-selection-color');
+
+    for (const stylesheet of [
+      'floating-assistant.css',
+      'study.css',
+      'library.css',
+    ]) {
+      const css = readFileSync(
+        new URL(`../../src/styles/${stylesheet}`, import.meta.url),
+        'utf8',
+      );
+      expect(css).toContain('--message-selection-bg');
+      expect(css).toContain('--message-selection-color');
+    }
+  });
+
   it('uses compact block spacing without preserving Markdown source whitespace', () => {
     const messageCss = readFileSync(
       new URL('../../src/styles/message-content.css', import.meta.url),

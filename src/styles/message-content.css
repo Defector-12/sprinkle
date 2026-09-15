@@ -6,6 +6,25 @@
   white-space: normal;
 }
 
+.message-plain,
+.message-reference,
+.message-reference *,
+.message-markdown,
+.message-markdown * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.message-plain::selection,
+.message-reference::selection,
+.message-reference *::selection,
+.message-markdown::selection,
+.message-markdown *::selection {
+  background: var(--message-selection-bg, Highlight);
+  color: var(--message-selection-color, HighlightText);
+  text-shadow: none;
+}
+
 .message-markdown > :first-child {
   margin-top: 0;
 }

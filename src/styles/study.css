@@ -12,6 +12,8 @@
   --study-accent: oklch(61% 0.17 43);
   --study-accent-dark: oklch(50% 0.16 40);
   --study-accent-soft: oklch(92% 0.045 48);
+  --message-selection-bg: var(--study-accent-dark);
+  --message-selection-color: white;
   color: var(--study-ink);
   background: var(--study-canvas);
   font-family:

@@ -101,6 +101,11 @@ describe('HistoryLibrary', () => {
     ).toBeVisible();
     expect(screen.getAllByText('What is durable memory?')).toHaveLength(2);
     expect(screen.getByText('Durable memory')).toBeVisible();
+    expect(
+      screen
+        .getByRole('list', { name: '历史问答' })
+        .querySelector('[data-question-id="question-1"] .message-plain'),
+    ).toHaveTextContent('What is durable memory?');
     expect(screen.getByRole('link', { name: /example\.com/ })).toHaveAttribute(
       'href',
       url,
