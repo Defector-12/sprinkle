@@ -46,6 +46,7 @@ import {
   AssistantMarkdown,
   messageAuthor,
   MessageReferenceCard,
+  QuestionTraceDetails,
 } from './MessageContent.tsx';
 import { ProblemDetailsPanel } from './ProblemDetailsPanel.tsx';
 import {
@@ -1344,7 +1345,10 @@ export function FloatingAssistant({ bridge }: FloatingAssistantProps) {
                           caretClassName="cr-stream-caret"
                         />
                       ) : (
-                        <p className="message-plain">{shownText}</p>
+                        <>
+                          <p className="message-plain">{shownText}</p>
+                          <QuestionTraceDetails trace={message.trace} />
+                        </>
                       )}
                     </li>
                   );

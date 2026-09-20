@@ -38,6 +38,7 @@ import {
   AssistantMarkdown,
   messageAuthor,
   MessageReferenceCard,
+  QuestionTraceDetails,
 } from './MessageContent.tsx';
 import {
   imageFileFromClipboard,
@@ -1170,7 +1171,9 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
             {context.messages.map((message) => (
               <li
                 key={message.id}
-                className={`study-message study-message--${message.role}`}
+                className={`study-message study-message--${message.role}${
+                  message.trace ? ' study-message--traced' : ''
+                }`}
                 data-question-id={
                   message.role === 'user' ? message.id : undefined
                 }
@@ -1184,7 +1187,10 @@ export function StudyWorkspace({ bridge }: StudyWorkspaceProps) {
                     caretClassName="study-stream-caret"
                   />
                 ) : (
-                  <p className="message-plain">{message.content}</p>
+                  <>
+                    <p className="message-plain">{message.content}</p>
+                    <QuestionTraceDetails trace={message.trace} />
+                  </>
                 )}
               </li>
             ))}

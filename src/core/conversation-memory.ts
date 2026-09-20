@@ -6,13 +6,15 @@ export const RECENT_HISTORY_CHARACTER_BUDGET = 24_000;
 export const RECENT_HISTORY_TURN_LIMIT = 6;
 export const RETRIEVED_HISTORY_TURN_LIMIT = 6;
 
-interface ConversationTurn {
+export interface ConversationTurn {
   index: number;
   question: ChatMessage;
   answer: ChatMessage;
 }
 
-function completedTurns(messages: ChatMessage[]): ConversationTurn[] {
+export function completedConversationTurns(
+  messages: ChatMessage[],
+): ConversationTurn[] {
   const turns: ConversationTurn[] = [];
   for (let index = 0; index < messages.length - 1; index += 1) {
     const question = messages[index];
@@ -47,39 +49,12 @@ function referenceText(message: ChatMessage): string {
     .join('\n');
 }
 
-function truncate(value: string, limit: number): string {
-  if (value.length <= limit) return value;
-  const marker = '\n[较早内容已截断]\n';
-  if (limit <= marker.length) return value.slice(0, Math.max(0, limit));
-  const available = limit - marker.length;
-  const startLength = Math.ceil(available * 0.7);
-  return `${value.slice(0, startLength)}${marker}${value.slice(
-    value.length - (available - startLength),
-  )}`;
-}
-
 function fitTurn(
   turn: ConversationTurn,
   budget: number,
 ): ConversationTurn | null {
   if (budget <= 0) return null;
-  if (turnLength(turn) <= budget) return turn;
-  const questionBudget = Math.min(
-    turn.question.content.length,
-    Math.max(1, Math.floor(budget * 0.35)),
-  );
-  const answerBudget = Math.max(0, budget - questionBudget);
-  return {
-    ...turn,
-    question: {
-      ...turn.question,
-      content: truncate(turn.question.content, questionBudget),
-    },
-    answer: {
-      ...turn.answer,
-      content: truncate(turn.answer.content, answerBudget),
-    },
-  };
+  return turnLength(turn) <= budget ? turn : null;
 }
 
 function asModelMessages(turns: ConversationTurn[]): ModelMessage[] {
@@ -92,26 +67,70 @@ function asModelMessages(turns: ConversationTurn[]): ModelMessage[] {
 export interface ConversationMemoryQuery {
   question: string;
   focusText?: string;
+  characterBudget?: number;
+  recentCharacterBudget?: number;
+  recentTurnLimit?: number;
+  retrievedTurnLimit?: number;
 }
 
-export function selectConversationHistory(
+export interface ConversationMemorySelection {
+  messages: ModelMessage[];
+  selectedTurns: ConversationTurn[];
+  recentTurnCount: number;
+  recalledTurnCount: number;
+  omittedTurnCount: number;
+  compactedPrefixTurns: ConversationTurn[];
+}
+
+export function selectConversationMemory(
   messages: ChatMessage[],
   query: ConversationMemoryQuery,
-): ModelMessage[] {
-  const turns = completedTurns(messages);
+): ConversationMemorySelection {
+  const turns = completedConversationTurns(messages);
+  const characterBudget = Math.max(
+    0,
+    query.characterBudget ?? HISTORY_CHARACTER_BUDGET,
+  );
+  if (characterBudget === 0) {
+    return {
+      messages: [],
+      selectedTurns: [],
+      recentTurnCount: 0,
+      recalledTurnCount: 0,
+      omittedTurnCount: turns.length,
+      compactedPrefixTurns: turns,
+    };
+  }
   const totalLength = turns.reduce(
     (sum, turn) => sum + turnLength(turn),
     0,
   );
-  if (totalLength <= HISTORY_CHARACTER_BUDGET) {
-    return asModelMessages(turns);
+  if (totalLength <= characterBudget) {
+    return {
+      messages: asModelMessages(turns),
+      selectedTurns: turns,
+      recentTurnCount: turns.length,
+      recalledTurnCount: 0,
+      omittedTurnCount: 0,
+      compactedPrefixTurns: [],
+    };
   }
 
-  const recentCandidates = turns.slice(-RECENT_HISTORY_TURN_LIMIT);
+  const recentCharacterBudget = Math.min(
+    characterBudget,
+    Math.max(
+      0,
+      query.recentCharacterBudget ??
+        RECENT_HISTORY_CHARACTER_BUDGET,
+    ),
+  );
+  const recentCandidates = turns.slice(
+    -Math.max(0, query.recentTurnLimit ?? RECENT_HISTORY_TURN_LIMIT),
+  );
   const recent: ConversationTurn[] = [];
   let recentLength = 0;
   for (const turn of recentCandidates.toReversed()) {
-    const remaining = RECENT_HISTORY_CHARACTER_BUDGET - recentLength;
+    const remaining = recentCharacterBudget - recentLength;
     const selected = fitTurn(turn, remaining);
     if (!selected) break;
     recent.push(selected);
@@ -119,12 +138,14 @@ export function selectConversationHistory(
     if (turnLength(turn) > remaining) break;
   }
 
-  const recentIndexes = new Set(recent.map((turn) => turn.index));
+  const recentWindowIndexes = new Set(
+    recentCandidates.map((turn) => turn.index),
+  );
   const queryTokens = tokensFor(
     `${query.question}\n${query.focusText ?? ''}`,
   );
   const olderCandidates = turns
-    .filter((turn) => !recentIndexes.has(turn.index))
+    .filter((turn) => !recentWindowIndexes.has(turn.index))
     .map((turn) => ({
       turn,
       score: overlapScore(
@@ -141,21 +162,50 @@ export function selectConversationHistory(
       (left, right) =>
         right.score - left.score || right.turn.index - left.turn.index,
     )
-    .slice(0, RETRIEVED_HISTORY_TURN_LIMIT);
+    .slice(
+      0,
+      Math.max(
+        0,
+        query.retrievedTurnLimit ?? RETRIEVED_HISTORY_TURN_LIMIT,
+      ),
+    );
 
   const recalled: ConversationTurn[] = [];
   let recalledLength = 0;
-  const recalledBudget = HISTORY_CHARACTER_BUDGET - recentLength;
+  const recalledBudget = characterBudget - recentLength;
   for (const candidate of olderCandidates) {
     const remaining = recalledBudget - recalledLength;
     const selected = fitTurn(candidate.turn, remaining);
-    if (!selected) break;
+    if (!selected) continue;
     recalled.push(selected);
     recalledLength += turnLength(selected);
-    if (turnLength(candidate.turn) > remaining) break;
   }
 
-  return asModelMessages(
-    [...recalled, ...recent].sort((left, right) => left.index - right.index),
+  const selectedTurns = [...recalled, ...recent].sort(
+    (left, right) => left.index - right.index,
   );
+  const selectedIndexes = new Set(selectedTurns.map((turn) => turn.index));
+  const firstRecentIndex = recent.length
+    ? Math.min(...recent.map((turn) => turn.index))
+    : undefined;
+  const compactedPrefixTurns =
+    firstRecentIndex == null
+      ? turns
+      : turns.filter((turn) => turn.index < firstRecentIndex);
+  return {
+    messages: asModelMessages(selectedTurns),
+    selectedTurns,
+    recentTurnCount: recent.length,
+    recalledTurnCount: recalled.length,
+    omittedTurnCount: turns.filter((turn) => !selectedIndexes.has(turn.index))
+      .length,
+    compactedPrefixTurns,
+  };
+}
+
+export function selectConversationHistory(
+  messages: ChatMessage[],
+  query: ConversationMemoryQuery,
+): ModelMessage[] {
+  return selectConversationMemory(messages, query).messages;
 }

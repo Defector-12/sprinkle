@@ -10,7 +10,8 @@ import type {
 export const WHOLE_ARTICLE_CHARACTER_BUDGET = 64_000;
 export const RELEVANT_CONTEXT_CHARACTER_BUDGET = 24_000;
 export const DEFAULT_RELEVANT_CHUNK_LIMIT = 8;
-const RETRIEVAL_CHILD_CHARACTER_LIMIT = 900;
+export const RETRIEVAL_CHUNK_TARGET = 900;
+export const RETRIEVAL_CHUNK_HARD_MAXIMUM = 1_200;
 const RETRIEVAL_CANDIDATE_LIMIT = 20;
 const RETRIEVAL_WINDOW_RADIUS = 1;
 const RECIPROCAL_RANK_FUSION_K = 60;
@@ -73,18 +74,28 @@ export interface ArticleContextSelection {
   isTruncated: boolean;
 }
 
+interface ChunkBlock {
+  block: ArticleBlock;
+  separatorBefore: string;
+  forceChunkStart: boolean;
+}
+
 function pushChunk(
   chunks: ArticleChunk[],
   section: string,
-  blocks: ArticleBlock[],
+  entries: ChunkBlock[],
 ): void {
-  if (!blocks.length) return;
+  if (!entries.length) return;
 
   chunks.push({
     id: `chunk-${chunks.length + 1}`,
     section,
-    text: blocks.map((block) => block.text).join('\n'),
-    blockIds: blocks.map((block) => block.id),
+    text: entries
+      .map(({ block, separatorBefore }, index) =>
+        `${index === 0 ? '' : separatorBefore}${block.text}`,
+      )
+      .join(''),
+    blockIds: entries.map(({ block }) => block.id),
   });
 }
 
@@ -168,45 +179,244 @@ export function articleContentBlocks(
     .map(({ block }, order) => ({ ...block, order }));
 }
 
+type TextSplitter = (value: string) => string[];
+
+function splitAfterMatches(value: string, pattern: RegExp): string[] {
+  const segments: string[] = [];
+  let start = 0;
+  for (const match of value.matchAll(pattern)) {
+    const end = (match.index ?? 0) + match[0].length;
+    if (end > start) segments.push(value.slice(start, end));
+    start = end;
+  }
+  if (start < value.length) segments.push(value.slice(start));
+  return segments.filter(Boolean);
+}
+
+function splitParagraphs(value: string): string[] {
+  return splitAfterMatches(value, /\n{2,}/g);
+}
+
+function fallbackSentenceSegments(value: string): string[] {
+  const segments: string[] = [];
+  let start = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    if (!/[。！？；.!?]/u.test(value[index] ?? '')) continue;
+    let end = index + 1;
+    while (end < value.length && /["'”’）)\]]/u.test(value[end] ?? '')) {
+      end += 1;
+    }
+    while (end < value.length && /\s/u.test(value[end] ?? '')) end += 1;
+    segments.push(value.slice(start, end));
+    start = end;
+    index = end - 1;
+  }
+  if (start < value.length) segments.push(value.slice(start));
+  return segments.filter(Boolean);
+}
+
+function splitSentences(value: string): string[] {
+  if (
+    typeof Intl !== 'undefined' &&
+    typeof Intl.Segmenter === 'function'
+  ) {
+    return [...new Intl.Segmenter(undefined, {
+      granularity: 'sentence',
+    }).segment(value)].map(({ segment }) => segment);
+  }
+  return fallbackSentenceSegments(value);
+}
+
+function splitClauses(value: string): string[] {
+  return splitAfterMatches(value, /[，、,:：]+(?:\s+)?/gu);
+}
+
+function splitWhitespace(value: string): string[] {
+  return splitAfterMatches(value, /\s+/gu);
+}
+
+function splitLines(value: string): string[] {
+  return splitAfterMatches(value, /\n/g);
+}
+
+function splitCells(value: string): string[] {
+  return splitAfterMatches(value, /\s*\|\s*/g);
+}
+
+function packSegments(segments: string[], hardMaximum: number): string[] {
+  const packed: string[] = [];
+  let current = '';
+  for (const segment of segments) {
+    if (current && current.length + segment.length > hardMaximum) {
+      packed.push(current);
+      current = '';
+    }
+    current += segment;
+  }
+  if (current) packed.push(current);
+  return packed;
+}
+
+function splitRecursively(
+  value: string,
+  splitters: TextSplitter[],
+  hardMaximum: number,
+  splitterIndex = 0,
+): string[] {
+  if (value.length <= hardMaximum) return [value];
+  if (splitterIndex >= splitters.length) {
+    const pieces: string[] = [];
+    for (let offset = 0; offset < value.length; offset += hardMaximum) {
+      pieces.push(value.slice(offset, offset + hardMaximum));
+    }
+    return pieces;
+  }
+
+  const splitter = splitters[splitterIndex] as TextSplitter;
+  const segments = splitter(value);
+  if (segments.length <= 1) {
+    return splitRecursively(
+      value,
+      splitters,
+      hardMaximum,
+      splitterIndex + 1,
+    );
+  }
+
+  return packSegments(
+    segments.flatMap((segment) =>
+      segment.length <= hardMaximum
+        ? [segment]
+        : splitRecursively(
+            segment,
+            splitters,
+            hardMaximum,
+            splitterIndex + 1,
+          ),
+    ),
+    hardMaximum,
+  );
+}
+
+function tableParts(text: string, hardMaximum: number): string[] | null {
+  const lines = text.split('\n');
+  if (lines.length < 3) return null;
+  const prefix = `${lines[0]}\n${lines[1]}`;
+  const rowLimit = hardMaximum - prefix.length - 1;
+  if (rowLimit < 1) return null;
+
+  const rows = lines.slice(2).flatMap((row) =>
+    splitRecursively(row, [splitCells, splitWhitespace], rowLimit),
+  );
+  const parts: string[] = [];
+  let selectedRows: string[] = [];
+  for (const row of rows) {
+    const candidate = `${prefix}\n${[...selectedRows, row].join('\n')}`;
+    if (selectedRows.length && candidate.length > hardMaximum) {
+      parts.push(`${prefix}\n${selectedRows.join('\n')}`);
+      selectedRows = [];
+    }
+    selectedRows.push(row);
+  }
+  if (selectedRows.length) {
+    parts.push(`${prefix}\n${selectedRows.join('\n')}`);
+  }
+  return parts;
+}
+
+function splitBlock(
+  block: ArticleBlock,
+  hardMaximum: number,
+): ChunkBlock[] {
+  if (block.text.length <= hardMaximum) {
+    return [{
+      block,
+      separatorBefore: '\n',
+      forceChunkStart: false,
+    }];
+  }
+
+  const isTable = block.id.startsWith('context-table-');
+  const pieces = isTable
+    ? tableParts(block.text, hardMaximum) ??
+      splitRecursively(
+        block.text,
+        [splitLines, splitCells, splitWhitespace],
+        hardMaximum,
+      )
+    : splitRecursively(
+        block.text,
+        block.type === 'code'
+          ? [splitLines, splitWhitespace]
+          : block.type === 'list'
+            ? [splitLines, splitSentences, splitClauses, splitWhitespace]
+            : [
+                splitParagraphs,
+                splitSentences,
+                splitClauses,
+                splitWhitespace,
+              ],
+        hardMaximum,
+      );
+
+  return pieces.map((text, index) => ({
+    block: {
+      ...block,
+      id: `${block.id}-part-${index + 1}`,
+      text,
+    },
+    separatorBefore: isTable ? '\n' : '',
+    forceChunkStart: isTable && index > 0,
+  }));
+}
+
 export function createArticleChunks(
   blocks: ArticleBlock[],
-  maxCharacters = RETRIEVAL_CHILD_CHARACTER_LIMIT,
+  targetCharacters = RETRIEVAL_CHUNK_TARGET,
+  hardMaximumCharacters = targetCharacters === RETRIEVAL_CHUNK_TARGET
+    ? RETRIEVAL_CHUNK_HARD_MAXIMUM
+    : targetCharacters,
 ): ArticleChunk[] {
-  const characterLimit = Math.max(1, Math.floor(maxCharacters));
+  const hardMaximum = Math.max(1, Math.floor(hardMaximumCharacters));
+  const target = Math.min(
+    hardMaximum,
+    Math.max(1, Math.floor(targetCharacters)),
+  );
   const chunks: ArticleChunk[] = [];
-  let currentBlocks: ArticleBlock[] = [];
+  let currentBlocks: ChunkBlock[] = [];
   let currentSection = blocks[0]?.section ?? 'Article';
   let currentLength = 0;
 
-  const boundedBlocks = blocks.flatMap((block) => {
-    if (block.text.length <= characterLimit) return [block];
-    const pieces: ArticleBlock[] = [];
-    for (let offset = 0; offset < block.text.length; offset += characterLimit) {
-      pieces.push({
-        ...block,
-        id: `${block.id}-part-${pieces.length + 1}`,
-        text: block.text.slice(offset, offset + characterLimit),
-      });
-    }
-    return pieces;
-  });
+  const boundedBlocks = blocks.flatMap((block) =>
+    splitBlock(block, hardMaximum),
+  );
 
-  for (const block of boundedBlocks) {
+  for (const entry of boundedBlocks) {
+    const { block } = entry;
     const startsNewSection =
       currentBlocks.length > 0 && block.section !== currentSection;
+    const separatorLength =
+      currentBlocks.length > 0 ? entry.separatorBefore.length : 0;
     const exceedsLimit =
       currentBlocks.length > 0 &&
-      currentLength + block.text.length + 1 > characterLimit;
+      currentLength + separatorLength + block.text.length > hardMaximum;
 
-    if (startsNewSection || exceedsLimit) {
+    if (startsNewSection || exceedsLimit || entry.forceChunkStart) {
       pushChunk(chunks, currentSection, currentBlocks);
       currentBlocks = [];
       currentLength = 0;
     }
 
     currentSection = block.section || currentSection;
-    currentBlocks.push(block);
-    currentLength += block.text.length + 1;
+    currentBlocks.push(entry);
+    currentLength +=
+      (currentBlocks.length > 1 ? entry.separatorBefore.length : 0) +
+      block.text.length;
+    if (currentLength >= target) {
+      pushChunk(chunks, currentSection, currentBlocks);
+      currentBlocks = [];
+      currentLength = 0;
+    }
   }
 
   pushChunk(chunks, currentSection, currentBlocks);
@@ -252,6 +462,13 @@ export interface RetrievalQuery {
   focusSection?: string;
   focusScope?: TextFocus['scope'];
   focusHeadingLevel?: number;
+  limit?: number;
+  characterBudget?: number;
+}
+
+export interface ExactMatchQuery {
+  question: string;
+  focusText?: string;
   limit?: number;
   characterBudget?: number;
 }
@@ -306,6 +523,7 @@ export function retrieveRelevantChunks(
     const characterBudget =
       query.characterBudget ?? RELEVANT_CONTEXT_CHARACTER_BUDGET;
     for (const chunk of matches) {
+      if (selected.length >= limit) break;
       const nextLength = selectedLength + chunkCharacterLength(chunk);
       if (nextLength > characterBudget) break;
       selected.push(chunk);
@@ -490,6 +708,91 @@ function evidenceWindow(
   };
 }
 
+function normalizeLiteral(value: string): string {
+  return value.toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function exactLiterals(query: ExactMatchQuery): string[] {
+  const values: string[] = [];
+  const add = (value: string | undefined) => {
+    const normalized = normalizeLiteral(value ?? '');
+    if (normalized.length >= 3) values.push(normalized);
+  };
+  add(query.focusText);
+
+  for (const pattern of [
+    /`([^`]+)`/gu,
+    /"([^"]+)"/gu,
+    /“([^”]+)”/gu,
+    /‘([^’]+)’/gu,
+    /「([^」]+)」/gu,
+    /『([^』]+)』/gu,
+  ]) {
+    for (const match of query.question.matchAll(pattern)) add(match[1]);
+  }
+
+  for (const match of query.question.matchAll(
+    /[\p{L}\p{N}_./:-]{3,}/gu,
+  )) {
+    const literal = normalizeLiteral(match[0]);
+    if (!RETRIEVAL_STOP_WORDS.has(literal)) values.push(literal);
+  }
+
+  return [...new Set(values)].toSorted(
+    (left, right) => right.length - left.length,
+  );
+}
+
+export function retrieveExactMatchChunks(
+  chunks: ArticleChunk[],
+  query: ExactMatchQuery,
+): ArticleChunk[] {
+  if (!chunks.length) return [];
+  const literals = exactLiterals(query);
+  if (!literals.length) return [];
+
+  const candidates = chunks
+    .map((chunk, index) => {
+      const content = normalizeLiteral(`${chunk.section}\n${chunk.text}`);
+      const matches = literals.filter((literal) => content.includes(literal));
+      return {
+        index,
+        longestMatch: Math.max(0, ...matches.map((match) => match.length)),
+        matchCount: matches.length,
+      };
+    })
+    .filter((candidate) => candidate.matchCount > 0)
+    .toSorted(
+      (left, right) =>
+        right.longestMatch - left.longestMatch ||
+        right.matchCount - left.matchCount ||
+        left.index - right.index,
+    );
+
+  const limit = Math.max(1, query.limit ?? DEFAULT_RELEVANT_CHUNK_LIMIT);
+  const characterBudget =
+    query.characterBudget ?? RELEVANT_CONTEXT_CHARACTER_BUDGET;
+  const selected: ArticleChunk[] = [];
+  const coveredIndexes = new Set<number>();
+  let usedCharacters = 0;
+  for (const candidate of candidates) {
+    if (selected.length >= limit || coveredIndexes.has(candidate.index)) {
+      continue;
+    }
+    const window = evidenceWindow(
+      chunks,
+      candidate.index,
+      characterBudget - usedCharacters,
+      coveredIndexes,
+    );
+    if (!window) continue;
+    selected.push(window.chunk);
+    usedCharacters += chunkCharacterLength(window.chunk);
+    for (const index of window.indexes) coveredIndexes.add(index);
+  }
+  return selected;
+}
+
 function retrieveBm25Windows(
   chunks: ArticleChunk[],
   questions: string[],
@@ -570,34 +873,158 @@ function chunkCharacterLength(chunk: ArticleChunk): number {
   return chunk.section.length + chunk.text.length + 3;
 }
 
+interface CoverageGroup {
+  key: string;
+  chunks: Array<{ chunk: ArticleChunk; index: number }>;
+}
+
+function coverageGroups(chunks: ArticleChunk[]): CoverageGroup[] {
+  const paths = chunks.map((chunk) =>
+    chunk.section.split(' > ').map((part) => part.trim()).filter(Boolean),
+  );
+  const firstComponents = new Set(paths.map((path) => path[0] ?? 'Article'));
+  const useSecondLevel =
+    firstComponents.size === 1 && paths.some((path) => path.length > 1);
+  const groups = new Map<string, CoverageGroup>();
+
+  for (const [index, chunk] of chunks.entries()) {
+    const path = paths[index] ?? [];
+    const key = useSecondLevel
+      ? path.slice(0, 2).join(' > ') || chunk.section
+      : path[0] || chunk.section;
+    const group = groups.get(key) ?? { key, chunks: [] };
+    group.chunks.push({ chunk, index });
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
+function evenlySpacedIndexes(length: number, count: number): number[] {
+  if (count <= 1) return [0];
+  return [
+    ...new Set(
+      Array.from({ length: count }, (_, index) =>
+        Math.round((index * (length - 1)) / (count - 1)),
+      ),
+    ),
+  ];
+}
+
+function selectedCharacters(
+  entries: Array<{ chunk: ArticleChunk; index: number }>,
+): number {
+  return entries.reduce(
+    (total, entry) => total + chunkCharacterLength(entry.chunk),
+    0,
+  );
+}
+
 function selectAcrossDocument(
   chunks: ArticleChunk[],
   characterBudget: number,
+  limit = DEFAULT_RELEVANT_CHUNK_LIMIT,
 ): ArticleChunk[] {
+  if (!chunks.length || characterBudget <= 0 || limit <= 0) return [];
   const totalLength = chunks.reduce(
     (total, chunk) => total + chunkCharacterLength(chunk),
     0,
   );
-  if (totalLength <= characterBudget) return chunks;
+  if (totalLength <= characterBudget && chunks.length <= limit) return chunks;
 
-  const largestChunkLength = Math.max(
-    ...chunks.map(chunkCharacterLength),
-  );
-  const selectedCount = Math.max(
-    1,
-    Math.min(
-      chunks.length,
-      Math.floor(characterBudget / largestChunkLength),
-    ),
-  );
-  if (selectedCount === 1) return [chunks[0] as ArticleChunk];
-
-  return Array.from({ length: selectedCount }, (_, index) => {
-    const sourceIndex = Math.round(
-      (index * (chunks.length - 1)) / (selectedCount - 1),
+  const groups = coverageGroups(chunks);
+  let selectedGroups: CoverageGroup[] = [];
+  for (
+    let count = Math.min(limit, groups.length);
+    count >= 1;
+    count -= 1
+  ) {
+    const candidateGroups = evenlySpacedIndexes(groups.length, count).map(
+      (index) => groups[index] as CoverageGroup,
     );
-    return chunks[sourceIndex] as ArticleChunk;
-  });
+    const leading = candidateGroups.map(
+      (group) => group.chunks[0] as { chunk: ArticleChunk; index: number },
+    );
+    if (selectedCharacters(leading) <= characterBudget) {
+      selectedGroups = candidateGroups;
+      break;
+    }
+  }
+  if (!selectedGroups.length) return [];
+
+  const selected = selectedGroups.map(
+    (group) => group.chunks[0] as { chunk: ArticleChunk; index: number },
+  );
+  const selectedIndexes = new Set(selected.map((entry) => entry.index));
+  const selectedBlockIds = new Set(
+    selected.flatMap((entry) => entry.chunk.blockIds),
+  );
+  let usedCharacters = selectedCharacters(selected);
+
+  while (selected.length < limit) {
+    const candidates = selectedGroups
+      .map((group) => {
+        const remaining = group.chunks.filter(
+          (entry) =>
+            !selectedIndexes.has(entry.index) &&
+            !entry.chunk.blockIds.some((id) => selectedBlockIds.has(id)),
+        );
+        if (!remaining.length) return null;
+        const representedCount = group.chunks.length - remaining.length;
+        const firstIndex = group.chunks[0]?.index ?? 0;
+        const lastIndex = group.chunks.at(-1)?.index ?? firstIndex;
+        const middleIndex = (firstIndex + lastIndex) / 2;
+        const candidate =
+          representedCount === 1
+            ? remaining.at(-1)
+            : remaining.toSorted(
+                (left, right) =>
+                  Math.abs(left.index - middleIndex) -
+                    Math.abs(right.index - middleIndex) ||
+                  left.index - right.index,
+              )[0];
+        return {
+          group,
+          candidate,
+          unrepresentedCharacters: selectedCharacters(remaining),
+        };
+      })
+      .filter(
+        (
+          value,
+        ): value is {
+          group: CoverageGroup;
+          candidate: { chunk: ArticleChunk; index: number };
+          unrepresentedCharacters: number;
+        } => Boolean(value?.candidate),
+      )
+      .toSorted(
+        (left, right) =>
+          right.unrepresentedCharacters - left.unrepresentedCharacters ||
+          left.candidate.index - right.candidate.index,
+      );
+    const next = candidates.find(
+      ({ candidate }) =>
+        usedCharacters + chunkCharacterLength(candidate.chunk) <=
+        characterBudget,
+    );
+    if (!next) break;
+    selected.push(next.candidate);
+    selectedIndexes.add(next.candidate.index);
+    for (const id of next.candidate.chunk.blockIds) selectedBlockIds.add(id);
+    usedCharacters += chunkCharacterLength(next.candidate.chunk);
+  }
+
+  return selected
+    .toSorted((left, right) => left.index - right.index)
+    .map(({ chunk }) => chunk);
+}
+
+export function selectDocumentCoverage(
+  chunks: ArticleChunk[],
+  characterBudget = WHOLE_ARTICLE_CHARACTER_BUDGET,
+  limit = DEFAULT_RELEVANT_CHUNK_LIMIT,
+): ArticleChunk[] {
+  return selectAcrossDocument(chunks, characterBudget, limit);
 }
 
 export function selectArticleContext(
@@ -615,6 +1042,7 @@ export function selectArticleContext(
   const selected = selectAcrossDocument(
     chunks,
     WHOLE_ARTICLE_CHARACTER_BUDGET,
+    chunks.length,
   );
   return {
     chunks: selected,

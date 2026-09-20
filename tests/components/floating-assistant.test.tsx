@@ -437,6 +437,128 @@ describe('FloatingAssistant', () => {
     expect(screen.getByText('DeepSeek')).toBeVisible();
   });
 
+  it('expands and copies the trace attached to a question', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    const context: PageContext = {
+      ...readyContext,
+      messages: [
+        {
+          id: 'question-with-trace',
+          role: 'user',
+          content: '内核 10 种事件有哪些？',
+          createdAt: 1,
+          trace: {
+            schemaVersion: 1,
+            pipelineVersion: 'context-assembler-v2',
+            extensionVersion: '0.1.0',
+            createdAt: 1,
+            updatedAt: 2,
+            status: 'completed',
+            question: '内核 10 种事件有哪些？',
+            article: {
+              rootKind: 'article',
+              readableCharacters: 22000,
+              blockCount: 148,
+              chunkCount: 46,
+              isPartial: false,
+            },
+            focus: {
+              type: 'text',
+              section: '3.3 管道 A 能收到哪些事件',
+              selectedCharacters: 10,
+            },
+            retrieval: {
+              strategy: 'full-context',
+              mode: 'whole',
+              isTruncated: false,
+              initialEvidence: [],
+              finalEvidence: [
+                {
+                  id: 'chunk-16',
+                  section: '3.3 管道 A 能收到哪些事件',
+                  text: '加上内核的 10 种生命周期事件。',
+                  characterCount: 18,
+                  blockIds: ['block-1'],
+                  sources: ['full-article'],
+                  reasons: ['全文与必要对话记忆可共同放入上下文预算。'],
+                  score: 1,
+                },
+              ],
+              budget: {
+                limit: 64000,
+                fullArticleCharacters: 22000,
+                articleCharacters: 22000,
+                historyCharacters: 0,
+                checkpointCharacters: 340,
+              },
+            },
+            planner: {
+              outcome: 'skipped',
+              reason:
+                '文章全文与必要对话记忆可放入统一预算，无需查询规划。',
+            },
+            memory: {
+              checkpointOutcome: 'created',
+              checkpointCharacters: 340,
+              throughMessageId: 'answer-7',
+              recentTurnCount: 2,
+              recalledTurnCount: 1,
+              compactedTurnCount: 7,
+            },
+            request: {
+              model: 'deepseek-test',
+              messageCount: 2,
+              textCharacters: 320,
+              imageCount: 0,
+              messages: [
+                { role: 'system', content: 'System prompt' },
+                {
+                  role: 'user',
+                  content: 'Only section 3.3 was sent.',
+                },
+              ],
+            },
+            response: {
+              outcome: 'completed',
+              characterCount: 80,
+              finishedAt: 2,
+            },
+          },
+        },
+      ],
+    };
+    render(<FloatingAssistant bridge={createBridge(context)} />);
+
+    await screen.findByRole('button', { name: '打开 Context Reader' });
+    await userEvent.click(
+      screen.getByRole('button', { name: '打开 Context Reader' }),
+    );
+    await userEvent.click(screen.getByText('回答诊断'));
+    expect(screen.getAllByText('已更新检查点').length).toBeGreaterThan(0);
+    expect(screen.getByText(/检查点覆盖 7 轮/)).toBeVisible();
+
+    expect(screen.getByText('本次问答链路')).toBeVisible();
+    expect(
+      screen.getByText('3.3 管道 A 能收到哪些事件', {
+        selector: 'p',
+      }),
+    ).toBeVisible();
+    await userEvent.click(screen.getByText('user'));
+    expect(screen.getByText('Only section 3.3 was sent.')).toBeVisible();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: '复制诊断' }),
+    );
+    await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+    expect(writeText.mock.calls[0]?.[0]).toContain(
+      'context-assembler-v2',
+    );
+  });
+
   it('clears and collapses the composer as soon as a question is sent', async () => {
     let resolveAsk: (context: PageContext) => void = () => undefined;
     const bridge = createBridge(readyContext, {

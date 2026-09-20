@@ -8,6 +8,7 @@ import {
 import type {
   ArticleDocument,
   ChatMessage,
+  ConversationCheckpoint,
   FocusContext,
 } from '../../src/core/types.ts';
 
@@ -25,6 +26,23 @@ const article: ArticleDocument = {
   ],
   images: [],
   isPartial: false,
+};
+
+const checkpoint: ConversationCheckpoint = {
+  schemaVersion: 1,
+  throughMessageId: 'answer-7',
+  coveredTurnCount: 8,
+  createdAt: 1,
+  updatedAt: 2,
+  goal: '依次讲解十个问题',
+  activeTopic: '下一项是问题 8',
+  items: [
+    { text: '问题 7', status: 'completed' },
+    { text: '问题 8', status: 'active' },
+  ],
+  decisions: [],
+  userConstraints: ['每次只讲一个'],
+  unresolvedReferences: ['“下一个”指问题 8'],
 };
 
 describe('buildModelRequest', () => {
@@ -52,7 +70,10 @@ describe('buildModelRequest', () => {
       '优先依据当前文章语境回答',
     );
     expect(request.messages[0]?.content).toContain(
-      '不得切换到其他相似章节',
+      '引用用于确定指代和回答重点，但不是检索边界',
+    );
+    expect(request.messages[0]?.content).toContain(
+      '历史对话只用于理解连续意图，不是文章事实',
     );
     expect(request.messages[0]?.content).toContain(
       '列表标记与内容必须写在同一行',
@@ -115,7 +136,7 @@ describe('buildModelRequest', () => {
     );
   });
 
-  it('does not carry previous answers into a newly focused question', () => {
+  it('uses the history selected by the context assembler for a focused question', () => {
     const history: ChatMessage[] = [
       {
         id: 'user-wrong',
@@ -143,6 +164,7 @@ describe('buildModelRequest', () => {
         },
       ],
       history,
+      selectedHistory: [],
       focus: {
         type: 'text',
         text: 'Governance considerations',
@@ -159,6 +181,60 @@ describe('buildModelRequest', () => {
       'Verification must run before a task is reported done.',
     );
     expect(serialized).not.toContain('reviewed by code owners');
+  });
+
+  it('can retain assembler-selected conversation memory alongside a focus', () => {
+    const request = buildModelRequest({
+      article,
+      question: 'How does this relate to the previous answer?',
+      relevantChunks: [],
+      history: [],
+      selectedHistory: [
+        {
+          role: 'user',
+          content: 'What does durable memory preserve?',
+        },
+        {
+          role: 'assistant',
+          content: 'It preserves state across sessions.',
+        },
+      ],
+      focus: {
+        type: 'text',
+        text: 'Short-term memory',
+        section: 'Memory types',
+      },
+    });
+
+    expect(request.messages.map((item) => item.role)).toEqual([
+      'system',
+      'user',
+      'assistant',
+      'user',
+    ]);
+    expect(JSON.stringify(request.messages)).toContain(
+      'It preserves state across sessions.',
+    );
+  });
+
+  it('labels conversation checkpoint state separately from article facts', () => {
+    const request = buildModelRequest({
+      article,
+      question: '讲下一个吧',
+      relevantChunks: [],
+      history: [],
+      selectedHistory: [],
+      conversationCheckpoint: checkpoint,
+      focus: null,
+    });
+    const serialized = JSON.stringify(request.messages);
+
+    expect(request.messages[0]?.content).toContain(
+      '会话状态只用于恢复用户目标、任务进度和指代',
+    );
+    expect(serialized).toContain('<conversation_state>');
+    expect(serialized).toContain('下一项是问题 8');
+    expect(serialized).toContain('<article_context>');
   });
 
   it('tells the model when a selected heading represents its whole section', () => {
@@ -306,7 +382,7 @@ describe('buildModelRequest', () => {
     const serialized = JSON.stringify(request.messages);
 
     expect(serialized).toContain('当前已解析到的文章全文');
-    expect(serialized).toContain('按全文位置均匀选取');
+    expect(serialized).toContain('经过检索和预算编排的部分内容');
     expect(serialized).not.toContain('当前页面内容已完成解析');
   });
 

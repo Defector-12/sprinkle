@@ -693,6 +693,11 @@ textarea:focus-visible,
   margin-left: auto;
 }
 
+.study-message--user.study-message--traced {
+  width: min(92%, 620px);
+  max-width: min(92%, 620px);
+}
+
 .study-message--user > span {
   text-align: right;
 }
@@ -703,6 +708,12 @@ textarea:focus-visible,
   color: var(--study-paper);
   padding: 10px 14px;
   overflow-wrap: anywhere;
+}
+
+.study-message--user.study-message--traced > .message-plain {
+  width: fit-content;
+  max-width: 78%;
+  margin-left: auto;
 }
 
 .study-message .message-reference {

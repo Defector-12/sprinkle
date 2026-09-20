@@ -101,6 +101,7 @@ export class SessionContextRepository {
       const updated = matching.map((context) => ({
         ...context,
         messages,
+        conversationCheckpoint: null,
         updatedAt: Date.now(),
       }));
       if (updated.length) {
@@ -124,6 +125,7 @@ export class SessionContextRepository {
         .map((context) => ({
           ...context,
           messages: [],
+          conversationCheckpoint: null,
           updatedAt: Date.now(),
         }));
       if (updated.length) {
@@ -192,12 +194,13 @@ function completeTurns(messages: ChatMessage[]): ChatMessage[][] {
 }
 
 function archiveMessage(message: ChatMessage): ChatMessage {
-  const reference = message.reference;
+  const { trace: _trace, ...messageWithoutTrace } = message;
+  const reference = messageWithoutTrace.reference;
   if (!reference || reference.type === 'text' || !reference.imageUrl) {
-    return message;
+    return messageWithoutTrace;
   }
   const { imageUrl: _imageUrl, ...metadata } = reference;
-  return { ...message, reference: metadata };
+  return { ...messageWithoutTrace, reference: metadata };
 }
 
 function archivedMessages(messages: ChatMessage[]): ChatMessage[] {

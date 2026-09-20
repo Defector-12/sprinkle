@@ -4,8 +4,12 @@ import {
   completeQuestionTurn,
   failQuestionTurn,
   recoverInterruptedQuestionTurn,
+  retainRecentQuestionTraces,
+  setQuestionTrace,
   snapshotMessageReference,
 } from '../../src/core/conversation-turn.ts';
+import { assembleQuestionContext } from '../../src/core/context-assembler.ts';
+import { createQuestionTrace } from '../../src/core/question-trace.ts';
 import { buildModelRequest } from '../../src/core/model-request.ts';
 import type {
   ArticleDocument,
@@ -146,5 +150,79 @@ describe('completeQuestionTurn', () => {
       status: 'ready',
       messages: [{ id: userMessage.id, error: true }],
     });
+  });
+
+  it('updates a question trace and marks it interrupted after worker recovery', () => {
+    const trace = createQuestionTrace({
+      article,
+      sourceChunkCount: 0,
+      question: userMessage.content,
+      focus: null,
+      assembly: assembleQuestionContext({
+        article,
+        chunks: [],
+        question: userMessage.content,
+        focus: null,
+        history: [],
+      }),
+      extensionVersion: '0.1.0',
+    });
+    const answeringContext: PageContext = {
+      key: '7:https://example.com/agent-memory',
+      tabId: 7,
+      url: article.url,
+      normalizedUrl: article.url,
+      title: article.title,
+      status: 'answering',
+      article,
+      focus: null,
+      messages: [userMessage],
+      warning: null,
+      updatedAt: 1,
+    };
+    const traced = setQuestionTrace(
+      answeringContext,
+      userMessage.id,
+      trace,
+    );
+    const recovered = recoverInterruptedQuestionTurn(traced);
+
+    expect(recovered.messages[0]).toMatchObject({
+      id: userMessage.id,
+      error: true,
+      trace: {
+        status: 'interrupted',
+        response: { outcome: 'interrupted' },
+      },
+    });
+  });
+
+  it('retains detailed traces for only the most recent questions', () => {
+    const trace = createQuestionTrace({
+      article,
+      sourceChunkCount: 0,
+      question: userMessage.content,
+      focus: null,
+      assembly: assembleQuestionContext({
+        article,
+        chunks: [],
+        question: userMessage.content,
+        focus: null,
+        history: [],
+      }),
+      extensionVersion: '0.1.0',
+    });
+    const messages = Array.from({ length: 3 }, (_, index) => ({
+      ...userMessage,
+      id: `user-${index}`,
+      createdAt: index,
+      trace,
+    }));
+
+    const retained = retainRecentQuestionTraces(messages, 2);
+
+    expect(retained[0]?.trace).toBeUndefined();
+    expect(retained[1]?.trace).toBe(trace);
+    expect(retained[2]?.trace).toBe(trace);
   });
 });

@@ -16,6 +16,7 @@ export function createPageContext(
     article: null,
     focus: null,
     messages: [],
+    conversationCheckpoint: null,
     warning: null,
     warningDetail: null,
     updatedAt: Date.now(),

@@ -133,6 +133,133 @@ export type MessageReference =
   | (Omit<ImageFocus, 'imageUrl'> & { imageUrl?: string })
   | (Omit<RegionFocus, 'imageUrl'> & { imageUrl?: string });
 
+export interface ConversationCheckpoint {
+  schemaVersion: 1;
+  throughMessageId: string;
+  coveredTurnCount: number;
+  createdAt: number;
+  updatedAt: number;
+  goal: string;
+  activeTopic: string;
+  items: Array<{
+    text: string;
+    status: 'pending' | 'active' | 'completed';
+  }>;
+  decisions: string[];
+  userConstraints: string[];
+  unresolvedReferences: string[];
+}
+
+export type QuestionTraceStatus =
+  | 'preparing'
+  | 'requesting'
+  | 'completed'
+  | 'failed'
+  | 'interrupted';
+
+export interface QuestionTraceEvidence {
+  id: string;
+  section: string;
+  text: string;
+  characterCount: number;
+  blockIds: string[];
+  sources?: string[];
+  reasons?: string[];
+  score?: number;
+}
+
+export interface QuestionTraceRequestMessage {
+  role: ModelMessage['role'];
+  content: string;
+}
+
+export interface QuestionTraceRequest {
+  model: string;
+  messageCount: number;
+  textCharacters: number;
+  imageCount: number;
+  messages: QuestionTraceRequestMessage[];
+}
+
+export interface QuestionTrace {
+  schemaVersion: 1;
+  pipelineVersion: string;
+  extensionVersion: string;
+  createdAt: number;
+  updatedAt: number;
+  status: QuestionTraceStatus;
+  question: string;
+  article: {
+    rootKind: ArticleRootKind | 'unknown';
+    readableCharacters: number;
+    blockCount: number;
+    chunkCount: number;
+    isPartial: boolean;
+  };
+  focus: {
+    type: FocusContext['type'] | 'none';
+    section?: string;
+    scope?: TextFocus['scope'];
+    text?: string;
+    selectedCharacters: number;
+  };
+  retrieval: {
+    strategy:
+      | 'full-context'
+      | 'fused-retrieval'
+      | 'whole-article'
+      | 'section-reference'
+      | 'focused-reference'
+      | 'bm25';
+    mode: 'relevant' | 'whole';
+    isTruncated: boolean;
+    initialEvidence: QuestionTraceEvidence[];
+    finalEvidence: QuestionTraceEvidence[];
+    budget?: {
+      limit: number;
+      fullArticleCharacters: number;
+      articleCharacters: number;
+      historyCharacters: number;
+      checkpointCharacters?: number;
+    };
+  };
+  planner: {
+    outcome: 'pending' | 'skipped' | 'completed' | 'unavailable';
+    reason: string;
+    rewrittenQuestion?: string;
+    queries?: string[];
+    evidenceNeeds?: Array<{
+      query: string;
+      reason: string;
+    }>;
+    coverage?: 'focused' | 'multi-section' | 'document-wide';
+    useConversation?: boolean;
+    request?: QuestionTraceRequest;
+    rawResponse?: string;
+    error?: string;
+  };
+  memory?: {
+    checkpointOutcome:
+      | 'not-needed'
+      | 'reused'
+      | 'created'
+      | 'unavailable';
+    checkpointCharacters: number;
+    throughMessageId?: string;
+    recentTurnCount: number;
+    recalledTurnCount: number;
+    compactedTurnCount: number;
+    error?: string;
+  };
+  request?: QuestionTraceRequest;
+  response?: {
+    outcome: 'completed' | 'failed' | 'interrupted';
+    characterCount?: number;
+    error?: string;
+    finishedAt: number;
+  };
+}
+
 export type AnswerModel = 'deepseek' | 'doubao'; // Doubao remains for archived conversations.
 
 export interface ChatMessage {
@@ -143,6 +270,7 @@ export interface ChatMessage {
   reference?: MessageReference;
   answeredBy?: AnswerModel;
   error?: boolean;
+  trace?: QuestionTrace;
 }
 
 export interface ArchivedConversation {
@@ -178,6 +306,7 @@ export interface PageContext {
   article: ArticleDocument | null;
   focus: FocusContext | null;
   messages: ChatMessage[];
+  conversationCheckpoint?: ConversationCheckpoint | null;
   warning: string | null;
   warningDetail?: string | null;
   updatedAt: number;

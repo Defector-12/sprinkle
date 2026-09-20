@@ -4,11 +4,19 @@ import { defineBackground } from 'wxt/utils/define-background';
 import { OperationVersionTracker } from '../src/application/operation-version.ts';
 import { SerialTaskQueue } from '../src/application/serial-task-queue.ts';
 import {
+  CONVERSATION_CHECKPOINT_TIMEOUT_MS,
+  generateConversationCheckpoint,
+  prepareConversationCheckpoint,
+} from '../src/core/conversation-checkpoint.ts';
+import {
   completeQuestionTurn,
   failQuestionTurn,
   recoverInterruptedQuestionTurn,
+  retainRecentQuestionTraces,
+  setQuestionTrace,
   snapshotMessageReference,
 } from '../src/core/conversation-turn.ts';
+import { assembleQuestionContext } from '../src/core/context-assembler.ts';
 import {
   buildModelRequest,
   buildTranslationRequest,
@@ -16,14 +24,22 @@ import {
 } from '../src/core/model-request.ts';
 import { createPageContext } from '../src/core/page-context.ts';
 import {
+  attachQuestionTraceRequest,
+  completeQuestionTrace,
+  createQuestionTrace,
+  failQuestionTrace,
+  snapshotQuestionTraceRequest,
+  updateQuestionTraceEvidence,
+  updateQuestionTraceMemory,
+  updateQuestionTracePlanner,
+} from '../src/core/question-trace.ts';
+import {
   planRetrievalQueries,
   QUERY_PLANNER_TIMEOUT_MS,
-  shouldPlanRetrieval,
 } from '../src/core/query-planner.ts';
 import {
   articleContentBlocks,
   createArticleChunks,
-  DEFAULT_RELEVANT_CHUNK_LIMIT,
   selectArticleContext,
 } from '../src/core/retrieval.ts';
 import { createPageKey, normalizePageUrl } from '../src/core/url.ts';
@@ -34,6 +50,7 @@ import type {
   FocusContext,
   MessageReference,
   PageContext,
+  QuestionTrace,
 } from '../src/core/types.ts';
 import {
   ConversationArchive,
@@ -56,13 +73,15 @@ import {
 import { captureVisibleTabForSender } from '../src/runtime/screenshot.ts';
 
 const environment = import.meta.env;
+const modelId =
+  environment.VITE_MODEL_ID?.trim() ||
+  'deepseek-flash';
+const extensionVersion = browser.runtime.getManifest().version;
 const modelClient = new OpenAiCompatibleModelClient({
   endpoint:
     environment.VITE_MODEL_API_URL?.trim() ||
     'https://api.deepseek.com/chat/completions',
-  model:
-    environment.VITE_MODEL_ID?.trim() ||
-    'deepseek-flash',
+  model: modelId,
 });
 const storageMutations = new SerialTaskQueue();
 const contexts = new SessionContextRepository(
@@ -307,17 +326,12 @@ async function performAskPage(
   }
 
   const chunks = createArticleChunks(articleContentBlocks(current.article));
-  let selectedContext = selectArticleContext(chunks, {
+  let selectedContext = assembleQuestionContext({
+    article: current.article,
+    chunks,
     question,
-    focusText: current.focus?.text,
-    focusSection: current.focus?.section,
-    focusScope:
-      current.focus?.type === 'text' ? current.focus.scope : undefined,
-    focusHeadingLevel:
-      current.focus?.type === 'text'
-        ? current.focus.headingLevel
-        : undefined,
-    limit: DEFAULT_RELEVANT_CHUNK_LIMIT,
+    focus: current.focus,
+    history: current.messages,
   });
   const userMessage = message(
     'user',
@@ -325,10 +339,22 @@ async function performAskPage(
     undefined,
     snapshotMessageReference(current.focus),
   );
+  let questionTrace = createQuestionTrace({
+    article: current.article,
+    sourceChunkCount: chunks.length,
+    question,
+    focus: current.focus,
+    assembly: selectedContext,
+    extensionVersion,
+  });
+  userMessage.trace = questionTrace;
   const withQuestion: PageContext = {
     ...current,
     status: 'answering',
-    messages: [...current.messages, userMessage],
+    messages: retainRecentQuestionTraces([
+      ...current.messages,
+      userMessage,
+    ]),
     updatedAt: Date.now(),
   };
   await requireMatchingTab(tab.id, tab.url);
@@ -336,51 +362,245 @@ async function performAskPage(
   await contexts.save(withQuestion);
   await notify(withQuestion);
 
+  const persistQuestionTrace = async (
+    trace: QuestionTrace,
+  ): Promise<void> => {
+    requireCurrentPageOperation(operationKey, generation);
+    const traced = await contexts.update(tab.id, tab.url, (latest) => {
+      requireCurrentPageOperation(operationKey, generation);
+      if (!latest.messages.some((item) => item.id === userMessage.id)) {
+        throw new StalePageOperationError(
+          '页面状态已更新，已忽略过期诊断。',
+        );
+      }
+      return setQuestionTrace(latest, userMessage.id, trace);
+    });
+    if (!traced) {
+      throw new StalePageOperationError(
+        '页面状态已更新，已忽略过期诊断。',
+      );
+    }
+    await notify(traced);
+  };
+
   try {
-    if (
-      !current.focus &&
-      selectedContext.mode === 'relevant' &&
-      shouldPlanRetrieval({
-        question,
-        hasEvidence: selectedContext.chunks.length > 0,
-        hasHistory: current.messages.some(
-          (item) => item.role === 'assistant' && !item.error,
-        ),
-      })
-    ) {
+    let checkpoint = current.conversationCheckpoint ?? null;
+    let activeCheckpoint = null as typeof checkpoint;
+    let checkpointOutcome: NonNullable<
+      QuestionTrace['memory']
+    >['checkpointOutcome'] = 'not-needed';
+    let checkpointError: string | undefined;
+    const checkpointPreparation =
+      selectedContext.memory.omittedTurnCount > 0
+        ? prepareConversationCheckpoint(
+            checkpoint,
+            selectedContext.memory.compactedPrefixTurns,
+          )
+        : null;
+
+    if (checkpointPreparation) {
+      checkpoint = checkpointPreparation.previousCheckpoint;
+      if (!checkpointPreparation.needsUpdate) {
+        checkpointOutcome = 'reused';
+      } else {
+        const generated = await generateConversationCheckpoint(
+          checkpointPreparation,
+          (request) =>
+            modelClient.complete(settings.apiKey, request, {
+              timeoutMs: CONVERSATION_CHECKPOINT_TIMEOUT_MS,
+            }),
+        );
+        requireCurrentPageOperation(operationKey, generation);
+        await requireMatchingTab(tab.id, tab.url);
+        checkpoint = generated.checkpoint;
+        checkpointOutcome = generated.outcome;
+        checkpointError = generated.error;
+        if (generated.outcome === 'created' && generated.checkpoint) {
+          try {
+            const checkpointContext = await contexts.update(
+              tab.id,
+              tab.url,
+              (latest) => {
+                requireCurrentPageOperation(operationKey, generation);
+                if (
+                  !latest.messages.some(
+                    (item) => item.id === userMessage.id,
+                  )
+                ) {
+                  throw new StalePageOperationError(
+                    '页面状态已更新，已忽略过期会话检查点。',
+                  );
+                }
+                return {
+                  ...latest,
+                  conversationCheckpoint: generated.checkpoint,
+                  updatedAt: Date.now(),
+                };
+              },
+            );
+            if (!checkpointContext) {
+              throw new StalePageOperationError(
+                '页面状态已更新，已忽略过期会话检查点。',
+              );
+            }
+          } catch (cause) {
+            if (cause instanceof StalePageOperationError) throw cause;
+            checkpoint = checkpointPreparation.previousCheckpoint;
+            checkpointOutcome = 'unavailable';
+            checkpointError = errorMessage(cause);
+          }
+        }
+      }
+      activeCheckpoint = checkpoint;
+      if (checkpoint) {
+        selectedContext = assembleQuestionContext({
+          article: current.article,
+          chunks,
+          question,
+          focus: current.focus,
+          history: current.messages,
+          conversationCheckpoint: checkpoint,
+        });
+      }
+    }
+    questionTrace = updateQuestionTraceMemory(questionTrace, {
+      checkpointOutcome,
+      checkpointCharacters: selectedContext.budget.checkpointCharacters,
+      ...(activeCheckpoint
+        ? { throughMessageId: activeCheckpoint.throughMessageId }
+        : {}),
+      recentTurnCount: selectedContext.memory.recentTurnCount,
+      recalledTurnCount: selectedContext.memory.recalledTurnCount,
+      compactedTurnCount: activeCheckpoint?.coveredTurnCount ?? 0,
+      ...(checkpointError ? { error: checkpointError } : {}),
+    });
+    await persistQuestionTrace(questionTrace);
+
+    const needsPlanning = selectedContext.needsPlanning;
+    if (needsPlanning) {
+      let plannerRawResponse: string | undefined;
+      let plannerError: string | undefined;
       const plan = await planRetrievalQueries(
         {
           article: current.article,
           question,
           history: current.messages,
+          focus: current.focus,
+          conversationCheckpoint: activeCheckpoint,
         },
-        (request) =>
-          modelClient.complete(settings.apiKey, request, {
-            timeoutMs: QUERY_PLANNER_TIMEOUT_MS,
-          }),
+        async (request) => {
+          questionTrace = updateQuestionTracePlanner(questionTrace, {
+            outcome: 'pending',
+            reason: '已触发查询规划，正在请求模型生成检索查询。',
+            request: snapshotQuestionTraceRequest(request, modelId),
+          });
+          await persistQuestionTrace(questionTrace);
+          try {
+            plannerRawResponse = await modelClient.complete(
+              settings.apiKey,
+              request,
+              {
+                timeoutMs: QUERY_PLANNER_TIMEOUT_MS,
+              },
+            );
+            return plannerRawResponse;
+          } catch (cause) {
+            plannerError = errorMessage(cause);
+            throw cause;
+          }
+        },
       );
       requireCurrentPageOperation(operationKey, generation);
       await requireMatchingTab(tab.id, tab.url);
       if (plan) {
-        selectedContext = selectArticleContext(chunks, {
+        questionTrace = updateQuestionTracePlanner(questionTrace, {
+          outcome: 'completed',
+          reason: '查询规划已完成，最终证据使用改写后的查询重新召回。',
+          rewrittenQuestion: plan.rewrittenQuestion,
+          queries: plan.queries,
+          evidenceNeeds: plan.evidenceNeeds,
+          coverage: plan.coverage,
+          useConversation: plan.useConversation,
+          request: questionTrace.planner.request,
+          rawResponse: plannerRawResponse,
+        });
+        selectedContext = assembleQuestionContext({
+          article: current.article,
+          chunks,
           question,
-          searchQueries: [plan.rewrittenQuestion, ...plan.queries],
-          limit: DEFAULT_RELEVANT_CHUNK_LIMIT,
+          focus: current.focus,
+          history: current.messages,
+          conversationCheckpoint: activeCheckpoint,
+          plan,
+          planningComplete: true,
+        });
+      } else {
+        questionTrace = updateQuestionTracePlanner(questionTrace, {
+          outcome: 'unavailable',
+          reason: plannerError
+            ? '查询规划请求失败，已回退到初始召回。'
+            : '查询规划返回格式无效，已回退到初始召回。',
+          request: questionTrace.planner.request,
+          ...(plannerRawResponse
+            ? { rawResponse: plannerRawResponse }
+            : {}),
+          ...(plannerError ? { error: plannerError } : {}),
+        });
+        selectedContext = assembleQuestionContext({
+          article: current.article,
+          chunks,
+          question,
+          focus: current.focus,
+          history: current.messages,
+          conversationCheckpoint: activeCheckpoint,
+          planningComplete: true,
         });
       }
+    } else {
+      questionTrace = updateQuestionTracePlanner(questionTrace, {
+        outcome: 'skipped',
+        reason:
+          selectedContext.strategy === 'full-context'
+            ? '文章全文与必要对话记忆可放入统一预算，无需查询规划。'
+            : '确定性上下文编排已完成，无需查询规划。',
+      });
     }
+    questionTrace = updateQuestionTraceMemory(questionTrace, {
+      checkpointOutcome,
+      checkpointCharacters: selectedContext.budget.checkpointCharacters,
+      ...(activeCheckpoint
+        ? { throughMessageId: activeCheckpoint.throughMessageId }
+        : {}),
+      recentTurnCount: selectedContext.memory.recentTurnCount,
+      recalledTurnCount: selectedContext.memory.recalledTurnCount,
+      compactedTurnCount: activeCheckpoint?.coveredTurnCount ?? 0,
+      ...(checkpointError ? { error: checkpointError } : {}),
+    });
+    questionTrace = updateQuestionTraceEvidence(
+      questionTrace,
+      selectedContext,
+    );
     const request = buildModelRequest({
       article: current.article,
       question,
       relevantChunks: selectedContext.chunks,
       history: current.messages,
+      selectedHistory: selectedContext.history,
+      conversationCheckpoint: selectedContext.conversationCheckpoint,
       focus: current.focus,
       contextMode: selectedContext.mode,
       contextTruncated: selectedContext.isTruncated,
     });
+    questionTrace = attachQuestionTraceRequest(
+      questionTrace,
+      request,
+      modelId,
+    );
+    await persistQuestionTrace(questionTrace);
     const answer = await modelClient.complete(settings.apiKey, request);
     requireCurrentPageOperation(operationKey, generation);
     await requireMatchingTab(tab.id, tab.url);
+    questionTrace = completeQuestionTrace(questionTrace, answer);
     const completed = await contexts.update(
       tab.id,
       tab.url,
@@ -395,8 +615,13 @@ async function performAskPage(
             '页面状态已更新，已忽略过期回答。',
           );
         }
-        return completeQuestionTurn(
+        const traced = setQuestionTrace(
           latest,
+          userMessage.id,
+          questionTrace,
+        );
+        return completeQuestionTurn(
+          traced,
           message('assistant', answer, 'deepseek'),
         );
       },
@@ -438,6 +663,10 @@ async function performAskPage(
         '原页面已关闭或跳转，请在当前页面重新打开 Context Reader。',
       );
     }
+    questionTrace = failQuestionTrace(
+      questionTrace,
+      errorMessage(cause),
+    );
     const recovered = await contexts.update(tab.id, tab.url, (latest) => {
       requireCurrentPageOperation(operationKey, generation);
       if (!latest.messages.some((item) => item.id === userMessage.id)) {
@@ -445,7 +674,10 @@ async function performAskPage(
           '页面状态已更新，已忽略过期回答。',
         );
       }
-      return failQuestionTurn(latest, userMessage.id);
+      return failQuestionTurn(
+        setQuestionTrace(latest, userMessage.id, questionTrace),
+        userMessage.id,
+      );
     });
     if (!recovered) {
       throw new StalePageOperationError(
@@ -698,6 +930,7 @@ async function hydrateArchivedMessages(
       return {
         ...latest,
         messages: mergeConversationMessages(archived, latest.messages),
+        conversationCheckpoint: null,
         updatedAt: Date.now(),
       };
     },

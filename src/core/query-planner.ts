@@ -5,41 +5,35 @@ import {
 import type { ModelRequest } from './types.ts';
 
 export const QUERY_PLANNER_TIMEOUT_MS = 10_000;
-const QUERY_PLAN_QUERY_LIMIT = 3;
-
-const FOLLOW_UP_PATTERN =
-  /(?:它|这个|这种|该(?:方法|模型|机制|结果)|其(?:方法|模型|机制|结果|局限|优势)|上述|前述|其中|前者|后者|\bit\b|\bthis\b|\bthat\b|\bthey\b|\bthem\b|\bthe former\b|\bthe latter\b)/i;
-const MULTI_EVIDENCE_PATTERN =
-  /(?:比较|对比|区别|异同|分别|关系|联系|优缺点|优势.+局限|\bcompare\b|\bversus\b|\bvs\.?\b|\bdifference\b|\brelationship\b|\btrade-?offs?\b|\badvantages?.+limitations?\b)/i;
+const QUERY_PLAN_QUERY_LIMIT = 4;
+const QUERY_PLAN_EVIDENCE_NEED_LIMIT = 4;
 
 export interface QueryPlan {
   rewrittenQuestion: string;
   queries: string[];
+  evidenceNeeds: Array<{
+    query: string;
+    reason: string;
+  }>;
+  coverage: 'focused' | 'multi-section' | 'document-wide';
+  useConversation: boolean;
 }
 
 export type QueryPlanInput = BuildQueryPlanRequestInput;
 
-export interface QueryPlanningDecision {
-  question: string;
-  hasEvidence: boolean;
-  hasHistory: boolean;
-}
-
 type CompleteQueryPlan = (request: ModelRequest) => Promise<string>;
-
-export function shouldPlanRetrieval(
-  decision: QueryPlanningDecision,
-): boolean {
-  if (!decision.hasEvidence) return true;
-  if (MULTI_EVIDENCE_PATTERN.test(decision.question)) return true;
-  return decision.hasHistory && FOLLOW_UP_PATTERN.test(decision.question);
-}
 
 export { buildQueryPlanRequest } from './prompts.ts';
 
 function cleanQuery(value: unknown): string {
   return typeof value === 'string'
     ? value.replace(/\s+/g, ' ').trim().slice(0, 500)
+    : '';
+}
+
+function cleanReason(value: unknown): string {
+  return typeof value === 'string'
+    ? value.replace(/\s+/g, ' ').trim().slice(0, 300)
     : '';
 }
 
@@ -52,6 +46,9 @@ export function parseQueryPlan(value: string): QueryPlan | null {
     const parsed = JSON.parse(value.slice(start, end + 1)) as {
       rewrittenQuestion?: unknown;
       queries?: unknown;
+      evidenceNeeds?: unknown;
+      coverage?: unknown;
+      useConversation?: unknown;
     };
     const rewrittenQuestion = cleanQuery(parsed.rewrittenQuestion);
     if (!rewrittenQuestion) return null;
@@ -68,7 +65,43 @@ export function parseQueryPlan(value: string): QueryPlan | null {
       uniqueQueries.push(query);
       if (uniqueQueries.length >= QUERY_PLAN_QUERY_LIMIT) break;
     }
-    return { rewrittenQuestion, queries: uniqueQueries };
+    const evidenceNeeds: QueryPlan['evidenceNeeds'] = [];
+    if (Array.isArray(parsed.evidenceNeeds)) {
+      for (const value of parsed.evidenceNeeds) {
+        if (!value || typeof value !== 'object') continue;
+        const candidate = value as {
+          query?: unknown;
+          reason?: unknown;
+        };
+        const query = cleanQuery(candidate.query);
+        if (!query) continue;
+        evidenceNeeds.push({
+          query,
+          reason: cleanReason(candidate.reason) || '回答问题所需证据',
+        });
+        if (evidenceNeeds.length >= QUERY_PLAN_EVIDENCE_NEED_LIMIT) break;
+      }
+    }
+    if (!evidenceNeeds.length) {
+      for (const query of uniqueQueries) {
+        evidenceNeeds.push({
+          query,
+          reason: '回答问题所需证据',
+        });
+      }
+    }
+    const coverage =
+      parsed.coverage === 'multi-section' ||
+      parsed.coverage === 'document-wide'
+        ? parsed.coverage
+        : 'focused';
+    return {
+      rewrittenQuestion,
+      queries: uniqueQueries,
+      evidenceNeeds,
+      coverage,
+      useConversation: parsed.useConversation === true,
+    };
   } catch {
     return null;
   }

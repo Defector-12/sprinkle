@@ -4,7 +4,6 @@ import {
   buildQueryPlanRequest,
   parseQueryPlan,
   planRetrievalQueries,
-  shouldPlanRetrieval,
 } from '../../src/core/query-planner.ts';
 import type {
   ArticleDocument,
@@ -72,41 +71,15 @@ const history: ChatMessage[] = [
 ];
 
 describe('query planner', () => {
-  it('plans low-recall, follow-up, and comparison questions only', () => {
-    expect(
-      shouldPlanRetrieval({
-        question: 'What is the retention policy?',
-        hasEvidence: false,
-        hasHistory: false,
-      }),
-    ).toBe(true);
-    expect(
-      shouldPlanRetrieval({
-        question: '它有哪些局限？',
-        hasEvidence: true,
-        hasHistory: true,
-      }),
-    ).toBe(true);
-    expect(
-      shouldPlanRetrieval({
-        question: 'Compare the baseline and proposed method.',
-        hasEvidence: true,
-        hasHistory: false,
-      }),
-    ).toBe(true);
-    expect(
-      shouldPlanRetrieval({
-        question: 'What threshold is used for calibration?',
-        hasEvidence: true,
-        hasHistory: false,
-      }),
-    ).toBe(false);
-  });
-
-  it('builds a compact request from the outline, abstract, and recent history', () => {
+  it('builds a compact request from the outline, focus, abstract, and recent history', () => {
     const request = buildQueryPlanRequest({
       article,
       question: '它和基线有什么区别？',
+      focus: {
+        type: 'text',
+        text: 'conformal calibration',
+        section: 'Method',
+      },
       history: [
         ...history,
         {
@@ -116,6 +89,19 @@ describe('query planner', () => {
           createdAt: 3,
         },
       ],
+      conversationCheckpoint: {
+        schemaVersion: 1,
+        throughMessageId: 'answer-7',
+        coveredTurnCount: 8,
+        createdAt: 1,
+        updatedAt: 2,
+        goal: '依次讲解十个问题',
+        activeTopic: '下一项是问题 8',
+        items: [{ text: '问题 8', status: 'active' }],
+        decisions: [],
+        userConstraints: [],
+        unresolvedReferences: ['“下一个”指问题 8'],
+      },
     });
     const serialized = JSON.stringify(request.messages);
 
@@ -124,6 +110,10 @@ describe('query planner', () => {
     expect(serialized).toContain('Method');
     expect(serialized).toContain('Results');
     expect(serialized).toContain('conformal calibration');
+    expect(serialized).toContain('当前引用');
+    expect(serialized).toContain('会话状态');
+    expect(serialized).toContain('下一项是问题 8');
+    expect(serialized).toContain('引用用于确定指代和回答重点');
     expect(serialized).not.toContain(
       'This implementation detail must not be sent to the planner.',
     );
@@ -132,7 +122,7 @@ describe('query planner', () => {
     );
   });
 
-  it('parses fenced JSON, deduplicates queries, and keeps at most three', () => {
+  it('parses evidence needs, coverage, conversation use, and query variants', () => {
     expect(
       parseQueryPlan(
         [
@@ -146,6 +136,18 @@ describe('query planner', () => {
               'conformal calibration method',
               'evaluation comparison',
             ],
+            evidenceNeeds: [
+              {
+                query: 'conformal calibration method',
+                reason: 'Find the proposed method.',
+              },
+              {
+                query: 'baseline calibration method',
+                reason: 'Find the comparison baseline.',
+              },
+            ],
+            coverage: 'multi-section',
+            useConversation: true,
           }),
           '```',
         ].join('\n'),
@@ -158,6 +160,18 @@ describe('query planner', () => {
         'baseline calibration method',
         'evaluation comparison',
       ],
+      evidenceNeeds: [
+        {
+          query: 'conformal calibration method',
+          reason: 'Find the proposed method.',
+        },
+        {
+          query: 'baseline calibration method',
+          reason: 'Find the comparison baseline.',
+        },
+      ],
+      coverage: 'multi-section',
+      useConversation: true,
     });
   });
 
@@ -203,6 +217,18 @@ describe('query planner', () => {
       rewrittenQuestion:
         'How does conformal calibration differ from the baseline?',
       queries: ['conformal calibration', 'baseline method'],
+      evidenceNeeds: [
+        {
+          query: 'conformal calibration',
+          reason: '回答问题所需证据',
+        },
+        {
+          query: 'baseline method',
+          reason: '回答问题所需证据',
+        },
+      ],
+      coverage: 'focused',
+      useConversation: false,
     });
     expect(complete).toHaveBeenCalledOnce();
   });

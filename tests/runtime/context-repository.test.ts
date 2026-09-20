@@ -64,6 +64,20 @@ function createContext(tabId: number, url: string): PageContext {
   };
 }
 
+const conversationCheckpoint = {
+  schemaVersion: 1 as const,
+  throughMessageId: 'answer-7',
+  coveredTurnCount: 8,
+  createdAt: 1,
+  updatedAt: 2,
+  goal: '依次讲解十个问题',
+  activeTopic: '问题 8',
+  items: [{ text: '问题 8', status: 'active' as const }],
+  decisions: [],
+  userConstraints: [],
+  unresolvedReferences: [],
+};
+
 describe('SessionContextRepository', () => {
   it('stores and restores contexts by tab and normalized URL', async () => {
     const storage = new MemoryStorage();
@@ -112,7 +126,10 @@ describe('SessionContextRepository', () => {
   it('clears messages for every context matching a normalized URL', async () => {
     const storage = new MemoryStorage();
     const repository = new SessionContextRepository(storage);
-    await repository.save(createContext(4, 'https://example.com/article'));
+    await repository.save({
+      ...createContext(4, 'https://example.com/article'),
+      conversationCheckpoint,
+    });
     await repository.save({
       ...createContext(5, 'https://example.com/article/'),
       normalizedUrl: 'https://example.com/article',
@@ -127,7 +144,10 @@ describe('SessionContextRepository', () => {
     expect(updated).toHaveLength(2);
     await expect(
       repository.get(4, 'https://example.com/article'),
-    ).resolves.toMatchObject({ messages: [] });
+    ).resolves.toMatchObject({
+      messages: [],
+      conversationCheckpoint: null,
+    });
     await expect(
       repository.get(6, 'https://example.com/other'),
     ).resolves.toMatchObject({ messages: [{ content: 'Question' }] });
@@ -136,13 +156,19 @@ describe('SessionContextRepository', () => {
   it('clears messages from every active context without deleting articles', async () => {
     const storage = new MemoryStorage();
     const repository = new SessionContextRepository(storage);
-    await repository.save(createContext(4, 'https://example.com/article'));
+    await repository.save({
+      ...createContext(4, 'https://example.com/article'),
+      conversationCheckpoint,
+    });
     await repository.save(createContext(5, 'https://example.com/other'));
 
     const updated = await repository.clearAllMessages();
 
     expect(updated).toHaveLength(2);
     expect(updated.every((context) => context.messages.length === 0)).toBe(true);
+    expect(
+      updated.every((context) => context.conversationCheckpoint === null),
+    ).toBe(true);
     expect(updated.every((context) => context.article !== null)).toBe(true);
   });
 
@@ -183,12 +209,67 @@ describe('ConversationArchive', () => {
     const archive = new ConversationArchive(storage);
     const context: PageContext = {
       ...createContext(4, 'https://example.com/article'),
+      conversationCheckpoint,
       messages: [
         {
           id: 'message',
           role: 'user',
           content: 'Question',
           createdAt: 1,
+          trace: {
+            schemaVersion: 1,
+            pipelineVersion: 'question-trace-v1',
+            extensionVersion: '0.1.0',
+            createdAt: 1,
+            updatedAt: 2,
+            status: 'completed',
+            question: 'Question',
+            article: {
+              rootKind: 'article',
+              readableCharacters: 42,
+              blockCount: 1,
+              chunkCount: 1,
+              isPartial: false,
+            },
+            focus: {
+              type: 'region',
+              selectedCharacters: 14,
+            },
+            retrieval: {
+              strategy: 'focused-reference',
+              mode: 'relevant',
+              isTruncated: false,
+              initialEvidence: [],
+              finalEvidence: [
+                {
+                  id: 'chunk-1',
+                  section: 'Results',
+                  text: 'Private article evidence',
+                  characterCount: 24,
+                  blockIds: ['block-1'],
+                },
+              ],
+            },
+            planner: {
+              outcome: 'skipped',
+              reason: 'Focused question.',
+            },
+            request: {
+              model: 'deepseek-test',
+              messageCount: 2,
+              textCharacters: 120,
+              imageCount: 1,
+              messages: [
+                { role: 'system', content: 'System prompt' },
+                { role: 'user', content: 'Private model request' },
+              ],
+            },
+            response: {
+              outcome: 'completed',
+              characterCount: 6,
+              finishedAt: 2,
+            },
+          },
           reference: {
             type: 'region',
             imageUrl: 'data:image/jpeg;base64,private-screenshot',
@@ -214,9 +295,23 @@ describe('ConversationArchive', () => {
     expect(JSON.stringify(storage.values)).not.toContain('"article"');
     expect(JSON.stringify(storage.values)).not.toContain('"focus"');
     expect(JSON.stringify(storage.values)).not.toContain('private-screenshot');
+    expect(JSON.stringify(storage.values)).not.toContain('question-trace-v1');
+    expect(JSON.stringify(storage.values)).not.toContain(
+      'Private article evidence',
+    );
+    expect(JSON.stringify(storage.values)).not.toContain(
+      'Private model request',
+    );
+    expect(JSON.stringify(storage.values)).not.toContain(
+      '依次讲解十个问题',
+    );
+    const { trace: _trace, ...archivedQuestion } =
+      context.messages[0] as NonNullable<
+        (typeof context.messages)[number]
+      >;
     await expect(archive.load(context.url)).resolves.toEqual([
       {
-        ...context.messages[0],
+        ...archivedQuestion,
         reference: {
           type: 'region',
           text: 'Selected chart',
