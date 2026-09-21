@@ -1,0 +1,1819 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Context Reader 项目全流程与学习路线</title>
+  <style>
+    :root {
+      --ink: #202522;
+      --muted: #65706a;
+      --line: #dce2de;
+      --line-strong: #bec9c2;
+      --paper: #ffffff;
+      --canvas: #f4f6f5;
+      --soft: #edf1ef;
+      --orange: #e85d32;
+      --orange-soft: #fff0ea;
+      --teal: #087f75;
+      --teal-soft: #e7f6f3;
+      --blue: #2864b4;
+      --blue-soft: #ebf2fb;
+      --violet: #7051a8;
+      --violet-soft: #f1ecfa;
+      --green: #317a48;
+      --green-soft: #eaf5ed;
+      --yellow: #956700;
+      --yellow-soft: #fff5d8;
+      --red: #b23a32;
+      --shadow: 0 10px 30px rgba(32, 37, 34, 0.08);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font-size: 15px;
+      line-height: 1.65;
+      letter-spacing: 0;
+    }
+
+    button,
+    input {
+      font: inherit;
+      letter-spacing: 0;
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    a:hover {
+      color: #184c8e;
+    }
+
+    :focus-visible {
+      outline: 3px solid rgba(40, 100, 180, 0.28);
+      outline-offset: 2px;
+    }
+
+    .page-header {
+      color: #f7faf8;
+      background: #202522;
+      border-bottom: 4px solid var(--orange);
+    }
+
+    .header-inner,
+    .main,
+    .footer-inner {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .header-inner {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 28px;
+      align-items: end;
+      padding: 36px 0 30px;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: #9fd7cf;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    h1 {
+      max-width: 760px;
+      margin-bottom: 10px;
+      font-size: clamp(30px, 4vw, 48px);
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+
+    .header-copy {
+      max-width: 760px;
+      margin-bottom: 0;
+      color: #c9d2cd;
+      font-size: 16px;
+    }
+
+    .header-meta {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(82px, 1fr));
+      gap: 8px;
+      min-width: 320px;
+    }
+
+    .header-meta div {
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid #46514b;
+      border-radius: 6px;
+      background: #29302c;
+    }
+
+    .header-meta strong,
+    .header-meta span {
+      display: block;
+    }
+
+    .header-meta strong {
+      color: #ffffff;
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    .header-meta span {
+      margin-top: 4px;
+      color: #aebbb4;
+      font-size: 12px;
+    }
+
+    .top-nav {
+      position: sticky;
+      z-index: 20;
+      top: 0;
+      background: rgba(255, 255, 255, 0.96);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(12px);
+    }
+
+    .top-nav__inner {
+      display: flex;
+      width: min(1180px, calc(100% - 40px));
+      min-height: 54px;
+      margin: 0 auto;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .nav-links,
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .nav-links a,
+    .nav-actions button {
+      display: inline-flex;
+      min-height: 34px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 5px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .nav-links a {
+      padding: 0 11px;
+    }
+
+    .nav-links a:hover {
+      background: var(--soft);
+    }
+
+    .nav-actions button {
+      padding: 0 10px;
+      border: 1px solid var(--line-strong);
+      background: var(--paper);
+      cursor: pointer;
+    }
+
+    .nav-actions button:hover {
+      background: var(--soft);
+    }
+
+    .main {
+      padding: 40px 0 72px;
+    }
+
+    .section-heading {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 20px;
+      align-items: end;
+      margin-bottom: 22px;
+    }
+
+    .section-heading h2 {
+      margin-bottom: 8px;
+      font-size: 28px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .section-heading p {
+      max-width: 760px;
+      margin-bottom: 0;
+      color: var(--muted);
+    }
+
+    .section-index {
+      color: var(--orange);
+      font-size: 40px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .overview {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(112px, 1fr));
+      gap: 22px;
+      margin: 0 0 42px;
+      padding: 20px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .overview-step {
+      position: relative;
+      min-width: 112px;
+    }
+
+    .overview-step:not(:last-child)::after {
+      position: absolute;
+      top: 18px;
+      right: -17px;
+      color: var(--line-strong);
+      content: "→";
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .overview-step span {
+      display: grid;
+      width: 36px;
+      height: 36px;
+      margin-bottom: 10px;
+      place-items: center;
+      border-radius: 50%;
+      color: #ffffff;
+      background: var(--ink);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .overview-step strong,
+    .overview-step small {
+      display: block;
+    }
+
+    .overview-step strong {
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    .overview-step small {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      margin-bottom: 22px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .legend i {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .legend .ui {
+      background: var(--orange);
+    }
+
+    .legend .content {
+      background: var(--teal);
+    }
+
+    .legend .background {
+      background: var(--blue);
+    }
+
+    .legend .core {
+      background: var(--violet);
+    }
+
+    .legend .storage {
+      background: var(--green);
+    }
+
+    .journey {
+      position: relative;
+      margin-bottom: 76px;
+    }
+
+    .journey::before {
+      position: absolute;
+      top: 18px;
+      bottom: 18px;
+      left: 31px;
+      width: 2px;
+      background: var(--line-strong);
+      content: "";
+    }
+
+    .phase {
+      position: relative;
+      margin: 0 0 34px;
+    }
+
+    .phase-header {
+      display: grid;
+      grid-template-columns: 64px minmax(0, 1fr);
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .phase-number {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      width: 42px;
+      height: 42px;
+      place-items: center;
+      border: 4px solid var(--canvas);
+      border-radius: 50%;
+      color: #ffffff;
+      background: var(--ink);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .phase-title {
+      min-width: 0;
+      padding-bottom: 10px;
+      border-bottom: 2px solid var(--ink);
+    }
+
+    .phase-title h3 {
+      margin-bottom: 2px;
+      font-size: 19px;
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    .phase-title p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .flow-list {
+      display: grid;
+      gap: 10px;
+      margin-left: 64px;
+    }
+
+    .flow-node {
+      position: relative;
+      display: grid;
+      grid-template-columns: 116px minmax(0, 1fr) minmax(210px, 0.62fr);
+      min-height: 76px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--paper);
+    }
+
+    .flow-node::before {
+      position: absolute;
+      top: -11px;
+      left: -34px;
+      width: 34px;
+      height: 1px;
+      background: var(--line-strong);
+      content: "";
+    }
+
+    .flow-node__actor {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 12px;
+      border-right: 1px solid var(--line);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .flow-node__actor::before {
+      display: inline-block;
+      flex: 0 0 auto;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: currentColor;
+      content: "";
+    }
+
+    .actor-ui {
+      color: var(--orange);
+      background: var(--orange-soft);
+    }
+
+    .actor-content {
+      color: var(--teal);
+      background: var(--teal-soft);
+    }
+
+    .actor-background {
+      color: var(--blue);
+      background: var(--blue-soft);
+    }
+
+    .actor-core {
+      color: var(--violet);
+      background: var(--violet-soft);
+    }
+
+    .actor-storage {
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .flow-node__main {
+      min-width: 0;
+      padding: 13px 16px;
+    }
+
+    .flow-node__main strong {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 15px;
+      line-height: 1.4;
+    }
+
+    .flow-node__main p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .flow-node__side {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      padding: 12px 14px;
+      border-left: 1px solid var(--line);
+      background: #fafbfa;
+    }
+
+    .flow-node__side code {
+      overflow-wrap: anywhere;
+      color: #3e4842;
+      font: 600 11px/1.55 "SFMono-Regular", Consolas, monospace;
+    }
+
+    .flow-node--decision {
+      border-color: #e5cc81;
+      background: var(--yellow-soft);
+    }
+
+    .flow-node--decision .flow-node__side {
+      background: #fff9e8;
+    }
+
+    .branch-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin: 0 0 10px 64px;
+    }
+
+    .branch {
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-left-width: 4px;
+      border-radius: 6px;
+      background: var(--paper);
+    }
+
+    .branch--yes {
+      border-left-color: var(--green);
+    }
+
+    .branch--no {
+      border-left-color: var(--violet);
+    }
+
+    .branch strong {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 13px;
+    }
+
+    .branch p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .loop {
+      display: grid;
+      grid-template-columns: 52px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      margin: 14px 0 4px 64px;
+      padding: 15px;
+      border: 2px dashed var(--orange);
+      border-radius: 8px;
+      background: var(--orange-soft);
+    }
+
+    .loop-mark {
+      display: grid;
+      width: 46px;
+      height: 46px;
+      place-items: center;
+      border-radius: 50%;
+      color: #ffffff;
+      background: var(--orange);
+      font-size: 25px;
+      font-weight: 800;
+    }
+
+    .loop strong {
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    .loop p {
+      margin-bottom: 0;
+      color: #7b432f;
+      font-size: 13px;
+    }
+
+    .note-band {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin: 28px 0 72px;
+    }
+
+    .note-band article {
+      padding: 18px;
+      border-top: 4px solid var(--ink);
+      background: var(--paper);
+    }
+
+    .note-band article:nth-child(2) {
+      border-top-color: var(--violet);
+    }
+
+    .note-band article:nth-child(3) {
+      border-top-color: var(--green);
+    }
+
+    .note-band strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .note-band p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .learning-layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 26px;
+      align-items: start;
+    }
+
+    .learning-aside {
+      position: sticky;
+      top: 76px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .learning-aside h3 {
+      margin-bottom: 8px;
+      font-size: 16px;
+    }
+
+    .learning-aside p {
+      margin-bottom: 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .progress-track {
+      height: 8px;
+      overflow: hidden;
+      border-radius: 4px;
+      background: var(--soft);
+    }
+
+    .progress-track span {
+      display: block;
+      width: 0;
+      height: 100%;
+      background: var(--green);
+      transition: width 180ms ease;
+    }
+
+    .progress-copy {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .route-principle {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .route-principle code {
+      display: block;
+      margin-top: 7px;
+      color: var(--violet);
+      font: 600 12px/1.6 "SFMono-Regular", Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+
+    .learning-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .learning-step {
+      display: grid;
+      grid-template-columns: 54px minmax(0, 1fr);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: 0 5px 18px rgba(32, 37, 34, 0.045);
+    }
+
+    .learning-step__index {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 18px;
+      border-right: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .learning-step__body {
+      min-width: 0;
+      padding: 16px 18px 18px;
+    }
+
+    .learning-step__header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .learning-step h3 {
+      margin-bottom: 4px;
+      font-size: 17px;
+      line-height: 1.35;
+    }
+
+    .learning-step__summary {
+      margin-bottom: 14px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .complete-control {
+      display: inline-flex;
+      min-height: 32px;
+      align-items: center;
+      gap: 7px;
+      padding: 0 9px;
+      border: 1px solid var(--line-strong);
+      border-radius: 5px;
+      background: var(--paper);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .complete-control input {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      accent-color: var(--green);
+    }
+
+    .complete-control span {
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .learning-step[data-complete="true"] {
+      border-color: #a9cbb3;
+      background: #fbfefc;
+    }
+
+    .learning-step[data-complete="true"] .learning-step__index {
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    .learning-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .learning-block h4 {
+      margin: 0 0 6px;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .learning-block p,
+    .learning-block ul {
+      margin: 0;
+      color: #3d4741;
+      font-size: 12px;
+    }
+
+    .learning-block ul {
+      padding-left: 18px;
+    }
+
+    .learning-block li + li {
+      margin-top: 4px;
+    }
+
+    .learning-files {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+
+    .learning-files a {
+      display: inline-flex;
+      max-width: 100%;
+      min-height: 28px;
+      align-items: center;
+      padding: 3px 8px;
+      border: 1px solid #d9d2e7;
+      border-radius: 4px;
+      color: var(--violet);
+      background: var(--violet-soft);
+      font: 600 11px/1.4 "SFMono-Regular", Consolas, monospace;
+      overflow-wrap: anywhere;
+      text-decoration: none;
+    }
+
+    .learning-files a:hover {
+      border-color: var(--violet);
+    }
+
+    .footer {
+      color: #c8d1cc;
+      background: var(--ink);
+    }
+
+    .footer-inner {
+      display: flex;
+      min-height: 90px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      font-size: 13px;
+    }
+
+    .footer p {
+      margin: 0;
+    }
+
+    .footer code {
+      color: #a8ddd5;
+      font-family: "SFMono-Regular", Consolas, monospace;
+    }
+
+    @media (max-width: 900px) {
+      .header-inner {
+        grid-template-columns: 1fr;
+        align-items: start;
+      }
+
+      .header-meta {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .flow-node {
+        grid-template-columns: 106px minmax(0, 1fr);
+      }
+
+      .flow-node__side {
+        grid-column: 1 / -1;
+        border-top: 1px solid var(--line);
+        border-left: 0;
+      }
+
+      .note-band {
+        grid-template-columns: 1fr;
+      }
+
+      .learning-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .learning-aside {
+        position: static;
+      }
+
+      .learning-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .header-inner,
+      .main,
+      .footer-inner,
+      .top-nav__inner {
+        width: min(100% - 24px, 1180px);
+      }
+
+      .header-inner {
+        padding: 28px 0 24px;
+      }
+
+      h1 {
+        font-size: 32px;
+      }
+
+      .header-meta {
+        grid-template-columns: 1fr;
+      }
+
+      .top-nav__inner {
+        min-height: 50px;
+      }
+
+      .nav-links a {
+        padding: 0 7px;
+        font-size: 12px;
+      }
+
+      .nav-actions {
+        display: none;
+      }
+
+      .main {
+        padding-top: 28px;
+      }
+
+      .section-heading {
+        grid-template-columns: 1fr;
+      }
+
+      .section-index {
+        display: none;
+      }
+
+      .overview {
+        grid-template-columns: repeat(8, 124px);
+        margin-right: -12px;
+        padding: 16px;
+      }
+
+      .journey::before {
+        left: 20px;
+      }
+
+      .phase-header {
+        grid-template-columns: 44px minmax(0, 1fr);
+      }
+
+      .phase-number {
+        width: 34px;
+        height: 34px;
+        border-width: 3px;
+      }
+
+      .flow-list,
+      .branch-grid,
+      .loop {
+        margin-left: 44px;
+      }
+
+      .flow-node {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-node__actor {
+        padding: 9px 12px;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .flow-node__main {
+        padding: 12px;
+      }
+
+      .branch-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .loop {
+        grid-template-columns: 40px minmax(0, 1fr);
+      }
+
+      .loop-mark {
+        width: 38px;
+        height: 38px;
+        font-size: 20px;
+      }
+
+      .learning-step {
+        grid-template-columns: 38px minmax(0, 1fr);
+      }
+
+      .learning-step__body {
+        padding: 14px 12px 16px;
+      }
+
+      .learning-step__header {
+        grid-template-columns: 1fr;
+      }
+
+      .complete-control {
+        width: fit-content;
+      }
+
+      .footer-inner {
+        display: grid;
+        padding: 20px 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      .progress-track span {
+        transition: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="page-header">
+    <div class="header-inner">
+      <div>
+        <p class="eyebrow">CONTEXT READER · PROJECT MAP</p>
+        <h1>从一次点击到第 N 轮对话</h1>
+        <p class="header-copy">
+          一张沿真实用户操作展开的工程流程图，以及按依赖关系组织的源码学习路线。
+        </p>
+      </div>
+      <div class="header-meta" aria-label="项目地图概览">
+        <div><strong>8</strong><span>运行阶段</span></div>
+        <div><strong>30</strong><span>关键节点</span></div>
+        <div><strong>9</strong><span>学习阶段</span></div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="top-nav" aria-label="页面导航">
+    <div class="top-nav__inner">
+      <div class="nav-links">
+        <a href="#journey">完整流程</a>
+        <a href="#boundaries">核心边界</a>
+        <a href="#learning">学习路线</a>
+      </div>
+      <div class="nav-actions">
+        <button id="collapse-all" type="button">收起学习详情</button>
+        <button id="reset-progress" type="button">重置进度</button>
+      </div>
+    </div>
+  </nav>
+
+  <main class="main">
+    <section id="journey" aria-labelledby="journey-title">
+      <div class="section-heading">
+        <div>
+          <h2 id="journey-title">完整运行流程</h2>
+          <p>
+            从网页处于休眠状态开始，经过解析、上下文组装、模型回答、多轮记忆，
+            最后进入工作台、学习记录和生命周期清理。
+          </p>
+        </div>
+        <span class="section-index" aria-hidden="true">01</span>
+      </div>
+
+      <div class="overview" aria-label="八阶段总览">
+        <div class="overview-step"><span>01</span><strong>休眠</strong><small>注入但不读取</small></div>
+        <div class="overview-step"><span>02</span><strong>激活</strong><small>用户显式点击</small></div>
+        <div class="overview-step"><span>03</span><strong>解析</strong><small>DOM 结构化</small></div>
+        <div class="overview-step"><span>04</span><strong>聚焦</strong><small>问题与引用</small></div>
+        <div class="overview-step"><span>05</span><strong>组装</strong><small>统一预算</small></div>
+        <div class="overview-step"><span>06</span><strong>回答</strong><small>模型与诊断</small></div>
+        <div class="overview-step"><span>07</span><strong>N 轮</strong><small>记忆与检查点</small></div>
+        <div class="overview-step"><span>08</span><strong>沉淀</strong><small>工作台与归档</small></div>
+      </div>
+
+      <div class="legend" aria-label="执行角色图例">
+        <span><i class="ui"></i>用户与 React UI</span>
+        <span><i class="content"></i>Content Script</span>
+        <span><i class="background"></i>Background</span>
+        <span><i class="core"></i>Core 与模型</span>
+        <span><i class="storage"></i>Storage 与生命周期</span>
+      </div>
+
+      <div class="journey">
+        <section class="phase" aria-labelledby="phase-1">
+          <header class="phase-header">
+            <span class="phase-number">01</span>
+            <div class="phase-title">
+              <h3 id="phase-1">网页加载与休眠</h3>
+              <p>扩展已存在，但没有读取正文，也没有调用模型。</p>
+            </div>
+          </header>
+          <div class="flow-list">
+            <article class="flow-node">
+              <div class="flow-node__actor actor-content">Content Script</div>
+              <div class="flow-node__main">
+                <strong>1. 在 document_idle 注入运行时</strong>
+                <p>匹配 HTTP/HTTPS 页面，只注册运行时与交互入口。</p>
+              </div>
+              <div class="flow-node__side"><code>entrypoints/content.ts:822-872</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-ui">React UI</div>
+              <div class="flow-node__main">
+                <strong>2. 挂载 closed Shadow DOM 浮窗</strong>
+                <p>标准 div 宿主隔离原站样式；初始化只读取已有状态。</p>
+              </div>
+              <div class="flow-node__side"><code>content.ts:420-465<br>FloatingAssistant.tsx:624-676</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-core">安全边界</div>
+              <div class="flow-node__main">
+                <strong>3. status = unactivated</strong>
+                <p>正文为空、浮窗隐藏、划词与图片监听器保持禁用。</p>
+              </div>
+              <div class="flow-node__side"><code>page-context.ts:4-23<br>types.ts:1-7</code></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="phase" aria-labelledby="phase-2">
+          <header class="phase-header">
+            <span class="phase-number">02</span>
+            <div class="phase-title">
+              <h3 id="phase-2">用户显式激活</h3>
+              <p>工具栏点击是读取页面的主要授权入口。</p>
+            </div>
+          </header>
+          <div class="flow-list">
+            <article class="flow-node">
+              <div class="flow-node__actor actor-ui">用户</div>
+              <div class="flow-node__main">
+                <strong>4. 点击浏览器工具栏图标</strong>
+                <p>Background 收到 browser.action.onClicked。</p>
+              </div>
+              <div class="flow-node__side"><code>background.ts:1179-1186</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-background">Background</div>
+              <div class="flow-node__main">
+                <strong>5. 发送 assistant:open</strong>
+                <p>Content Script 不存在时先动态注入，然后重新发送。</p>
+              </div>
+              <div class="flow-node__side"><code>background.ts:1158-1177</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-ui">Floating UI</div>
+              <div class="flow-node__main">
+                <strong>6. 打开浮窗并请求 context:activate</strong>
+                <p>界面先显示 parsing，再等待后台返回真实上下文。</p>
+              </div>
+              <div class="flow-node__side"><code>FloatingAssistant.tsx:554-587</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-background">Background</div>
+              <div class="flow-node__main">
+                <strong>7. 创建页面身份与 generation</strong>
+                <p>pageKey = tabId + 规范化 URL；新操作使旧异步结果失效。</p>
+              </div>
+              <div class="flow-node__side"><code>url.ts:13-38<br>background.ts:125-164</code></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="phase" aria-labelledby="phase-3">
+          <header class="phase-header">
+            <span class="phase-number">03</span>
+            <div class="phase-title">
+              <h3 id="phase-3">解析网页与建立文章快照</h3>
+              <p>解析负责决定系统能够看见哪些信息。</p>
+            </div>
+          </header>
+          <div class="flow-list">
+            <article class="flow-node">
+              <div class="flow-node__actor actor-storage">Session</div>
+              <div class="flow-node__main">
+                <strong>8. 恢复或新建 PageContext</strong>
+                <p>优先读取 session；新上下文会按 URL 合并已有学习记录。</p>
+              </div>
+              <div class="flow-node__side"><code>background.ts:218-253</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-background">Background</div>
+              <div class="flow-node__main">
+                <strong>9. 保存 parsing 并请求 page:extract</strong>
+                <p>先通知所有视图进入理解中，再让原网页执行 DOM 提取。</p>
+              </div>
+              <div class="flow-node__side"><code>background.ts:240-259</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-content">Extractor</div>
+              <div class="flow-node__main">
+                <strong>10. 选择正文根节点</strong>
+                <p>article → main → [role="main"] → body；同级取可读内容最多者。</p>
+              </div>
+              <div class="flow-node__side"><code>article-extractor.ts:309-338</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-content">Extractor</div>
+              <div class="flow-node__main">
+                <strong>11. 结构化正文</strong>
+                <p>提取标题路径、段落、代码、列表、引用、图片、表格和公式。</p>
+              </div>
+              <div class="flow-node__side"><code>article-extractor.ts:532-675</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-content">Diagnostics</div>
+              <div class="flow-node__main">
+                <strong>12. 判断 ready / partial</strong>
+                <p>少于 80 字或仍有 loading 信号时为 partial，并记录结构诊断。</p>
+              </div>
+              <div class="flow-node__side"><code>article-extractor.ts:676-734</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-background">Background</div>
+              <div class="flow-node__main">
+                <strong>13. 校验 URL 与 generation 后提交快照</strong>
+                <p>过期页面、跳转页面和旧解析结果都不能覆盖当前状态。</p>
+              </div>
+              <div class="flow-node__side"><code>background.ts:259-292</code></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="phase" aria-labelledby="phase-4">
+          <header class="phase-header">
+            <span class="phase-number">04</span>
+            <div class="phase-title">
+              <h3 id="phase-4">用户准备问题</h3>
+              <p>直接提问、文字引用与视觉引用最终都汇入 focus。</p>
+            </div>
+          </header>
+          <div class="flow-list">
+            <article class="flow-node flow-node--decision">
+              <div class="flow-node__actor actor-ui">配置分支</div>
+              <div class="flow-node__main">
+                <strong>14. 是否已有 DeepSeek API Key？</strong>
+                <p>没有 Key 仍可完成解析，但输入框保持禁用。</p>
+              </div>
+              <div class="flow-node__side"><code>settings-store.ts:31-43<br>FloatingAssistant.tsx:360-386</code></div>
+            </article>
+          </div>
+          <div class="branch-grid">
+            <article class="branch branch--yes">
+              <strong>有 Key → 继续提问</strong>
+              <p>Key 只由 trusted extension context 从 storage.local 读取。</p>
+            </article>
+            <article class="branch branch--no">
+              <strong>无 Key → 打开设置 → 返回</strong>
+              <p>保存后无需重新解析正文，只刷新可用状态。</p>
+            </article>
+          </div>
+          <div class="flow-list">
+            <article class="flow-node">
+              <div class="flow-node__actor actor-ui">用户</div>
+              <div class="flow-node__main">
+                <strong>15. 选择问题依据</strong>
+                <p>可直接输入，或划词、选标题、点图、框选、上传及粘贴图片。</p>
+              </div>
+              <div class="flow-node__side"><code>content.ts:219-408<br>content.ts:553-820</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-background">Focus</div>
+              <div class="flow-node__main">
+                <strong>16. focus 写入页面级临时上下文</strong>
+                <p>引用是高优先级锚点，不是限制检索范围的边界。</p>
+              </div>
+              <div class="flow-node__side"><code>background.ts:782-825<br>types.ts:104-135</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-ui">独立支线</div>
+              <div class="flow-node__main">
+                <strong>17. 划词翻译不会进入对话</strong>
+                <p>只取附近文章上下文消歧；必要时对未翻译英文词重试一次。</p>
+              </div>
+              <div class="flow-node__side"><code>background.ts:712-761</code></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="phase" aria-labelledby="phase-5">
+          <header class="phase-header">
+            <span class="phase-number">05</span>
+            <div class="phase-title">
+              <h3 id="phase-5">问题进入上下文编排</h3>
+              <p>这是系统核心：文章、历史和检查点竞争同一个预算。</p>
+            </div>
+          </header>
+          <div class="flow-list">
+            <article class="flow-node">
+              <div class="flow-node__actor actor-ui">Composer</div>
+              <div class="flow-node__main">
+                <strong>18. 发送问题并立即清空输入框</strong>
+                <p>UI 记录回答前最后一条 assistant ID，用于判断是否播放逐字动画。</p>
+              </div>
+              <div class="flow-node__side"><code>FloatingAssistant.tsx:702-728</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-background">Guard</div>
+              <div class="flow-node__main">
+                <strong>19. 校验页面、状态、Key 与并发</strong>
+                <p>同一 pageKey 同时只允许一个回答任务。</p>
+              </div>
+              <div class="flow-node__side"><code>background.ts:311-327<br>background.ts:692-710</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-core">Retrieval</div>
+              <div class="flow-node__main">
+                <strong>20. 转换结构化内容并切 Chunk</strong>
+                <p>图片说明、表格、公式进入正文序列；900 字目标，1200 字硬上限。</p>
+              </div>
+              <div class="flow-node__side"><code>retrieval.ts:102-180<br>retrieval.ts:373-424</code></div>
+            </article>
+            <article class="flow-node flow-node--decision">
+              <div class="flow-node__actor actor-core">预算决策</div>
+              <div class="flow-node__main">
+                <strong>21. 全文 + 必要记忆能否放入 64,000 字？</strong>
+                <p>检查点先占预算，文章和历史使用剩余空间。</p>
+              </div>
+              <div class="flow-node__side"><code>context-assembler.ts:262-318</code></div>
+            </article>
+          </div>
+          <div class="branch-grid">
+            <article class="branch branch--yes">
+              <strong>能 → full-context</strong>
+              <p>全文按原顺序发送，剩余预算用于历史，不调用 Planner。</p>
+            </article>
+            <article class="branch branch--no">
+              <strong>不能 → fused-retrieval</strong>
+              <p>引用锚点 + 精确匹配 + BM25 + Planner 需求 + 章节覆盖。</p>
+            </article>
+          </div>
+          <div class="flow-list">
+            <article class="flow-node">
+              <div class="flow-node__actor actor-core">Memory</div>
+              <div class="flow-node__main">
+                <strong>22. 选择本轮对话原文</strong>
+                <p>只选成功问答；优先最近最多 6 轮，再召回相关旧问答。</p>
+              </div>
+              <div class="flow-node__side"><code>conversation-memory.ts:85-203</code></div>
+            </article>
+            <article class="flow-node flow-node--decision">
+              <div class="flow-node__actor actor-core">Checkpoint</div>
+              <div class="flow-node__main">
+                <strong>23. 是否有旧前缀离开原文窗口？</strong>
+                <p>有则增量生成最多 4000 字的结构化会话状态。</p>
+              </div>
+              <div class="flow-node__side"><code>conversation-checkpoint.ts:60-82<br>background.ts:386-477</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-core">Planner</div>
+              <div class="flow-node__main">
+                <strong>24. 超预算文章调用 Query Planner</strong>
+                <p>生成独立问题、查询、证据需求和覆盖范围；10 秒失败即回退。</p>
+              </div>
+              <div class="flow-node__side"><code>query-planner.ts:40-119<br>background.ts:479-558</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-core">Fusion</div>
+              <div class="flow-node__main">
+                <strong>25. RRF 融合、blockIds 去重并打包</strong>
+                <p>先保引用，再覆盖 Planner 需求，最后按分数填充最多 8 个窗口。</p>
+              </div>
+              <div class="flow-node__side"><code>context-assembler.ts:108-236<br>context-assembler.ts:321-433</code></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="phase" aria-labelledby="phase-6">
+          <header class="phase-header">
+            <span class="phase-number">06</span>
+            <div class="phase-title">
+              <h3 id="phase-6">模型请求与回答落地</h3>
+              <p>Background 是唯一模型调用方，也是状态提交者。</p>
+            </div>
+          </header>
+          <div class="flow-list">
+            <article class="flow-node">
+              <div class="flow-node__actor actor-core">Prompt</div>
+              <div class="flow-node__main">
+                <strong>26. 组装最终 ModelRequest</strong>
+                <p>system + 筛选历史 + conversation_state + article_context + 问题 + 可选图片。</p>
+              </div>
+              <div class="flow-node__side"><code>prompts.ts:161-217</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-core">DeepSeek</div>
+              <div class="flow-node__main">
+                <strong>27. 调用 Chat Completions</strong>
+                <p>默认 deepseek-flash，stream:false，正式回答最长等待 45 秒。</p>
+              </div>
+              <div class="flow-node__side"><code>model-client.ts:133-179</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-background">Commit</div>
+              <div class="flow-node__main">
+                <strong>28. 原子完成或失败当前 Turn</strong>
+                <p>成功追加回答并清除 focus；失败标记问题并保留 focus 供重试。</p>
+              </div>
+              <div class="flow-node__side"><code>conversation-turn.ts:18-97<br>background.ts:600-688</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-ui">All Views</div>
+              <div class="flow-node__main">
+                <strong>29. 广播 context:changed</strong>
+                <p>发送视图播放客户端逐字动画，其他视图直接显示完整回答。</p>
+              </div>
+              <div class="flow-node__side"><code>background.ts:199-210<br>use-streamed-answer.ts:20-102</code></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="phase" aria-labelledby="phase-7">
+          <header class="phase-header">
+            <span class="phase-number">07</span>
+            <div class="phase-title">
+              <h3 id="phase-7">第 2 轮到第 N 轮</h3>
+              <p>完整消息继续增长，但模型输入始终受统一预算约束。</p>
+            </div>
+          </header>
+          <div class="loop">
+            <span class="loop-mark" aria-hidden="true">↻</span>
+            <div>
+              <strong>30. 回到步骤 15，形成 N 轮循环</strong>
+              <p>
+                新引用重新锚定当前问题；最近原文、相关旧问答和会话检查点共同恢复连续意图。
+                问题达到 3 个后显示历史轨道，方便跳转。
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section class="phase" aria-labelledby="phase-8">
+          <header class="phase-header">
+            <span class="phase-number">08</span>
+            <div class="phase-title">
+              <h3 id="phase-8">工作台、学习记录与退出</h3>
+              <p>同一上下文可以换视图，但长期存储严格剥离正文和图片。</p>
+            </div>
+          </header>
+          <div class="flow-list">
+            <article class="flow-node">
+              <div class="flow-node__actor actor-ui">Workspace</div>
+              <div class="flow-node__main">
+                <strong>工作台复用同一个 PageContext</strong>
+                <p>通过固定 tabId + URL 绑定原网页，左侧重建文章，右侧继续原对话。</p>
+              </div>
+              <div class="flow-node__side"><code>study-bridge.ts:37-194<br>StudyWorkspace.tsx</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-storage">Archive</div>
+              <div class="flow-node__main">
+                <strong>可选保存成功问答</strong>
+                <p>剥离文章、检查点、Question Trace、截图和 imageUrl，只留问答与引用说明。</p>
+              </div>
+              <div class="flow-node__side"><code>context-repository.ts:177-207<br>context-repository.ts:269-368</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-background">Resume</div>
+              <div class="flow-node__main">
+                <strong>学习记录继续提问</strong>
+                <p>优先复用有效标签页，否则激活现有网页，最后才新建标签页重新解析。</p>
+              </div>
+              <div class="flow-node__side"><code>background.ts:1000-1038</code></div>
+            </article>
+            <article class="flow-node">
+              <div class="flow-node__actor actor-storage">Cleanup</div>
+              <div class="flow-node__main">
+                <strong>收起、停止与关闭是三种不同动作</strong>
+                <p>收起只隐藏；停止删除当前页面 session；关标签页先归档再删除该 tab 上下文。</p>
+              </div>
+              <div class="flow-node__side"><code>background.ts:763-769<br>background.ts:1192-1217</code></div>
+            </article>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section id="boundaries" aria-labelledby="boundaries-title">
+      <div class="section-heading">
+        <div>
+          <h2 id="boundaries-title">三个核心边界</h2>
+          <p>后续理解任何模块时，都先判断它位于哪条边界的哪一侧。</p>
+        </div>
+        <span class="section-index" aria-hidden="true">02</span>
+      </div>
+      <div class="note-band">
+        <article>
+          <strong>解析边界</strong>
+          <p>解析决定系统能否看见信息；检索只能从 ArticleDocument 中选择，无法找回未解析内容。</p>
+        </article>
+        <article>
+          <strong>记忆边界</strong>
+          <p>完整 messages、本轮 selectedHistory 和派生 checkpoint 是三种不同的数据，可信度也不同。</p>
+        </article>
+        <article>
+          <strong>存储边界</strong>
+          <p>正文、焦点、诊断和检查点只进 session；长期 local 归档只保存成功问答文本。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="learning" aria-labelledby="learning-title">
+      <div class="section-heading">
+        <div>
+          <h2 id="learning-title">推荐学习路线</h2>
+          <p>
+            顺序遵循“先建立运行时骨架，再理解算法，最后回到 UI 和工程保障”。
+            不建议一开始逐行阅读两个大型 React 组件。
+          </p>
+        </div>
+        <span class="section-index" aria-hidden="true">03</span>
+      </div>
+
+      <div class="learning-layout">
+        <aside class="learning-aside">
+          <h3>学习进度</h3>
+          <p>完成一个阶段后勾选。进度只保存在当前浏览器。</p>
+          <div class="progress-track" aria-hidden="true"><span id="progress-bar"></span></div>
+          <div class="progress-copy">
+            <span id="progress-count">0 / 9</span>
+            <span id="progress-percent">0%</span>
+          </div>
+          <div class="route-principle">
+            <strong>阅读原则</strong>
+            <code>数据结构 → 调用入口 → 状态变化 → 失败分支 → 测试证据</code>
+          </div>
+        </aside>
+
+        <div class="learning-list">
+          <article class="learning-step" data-stage="1" data-complete="false">
+            <div class="learning-step__index">01</div>
+            <div class="learning-step__body">
+              <header class="learning-step__header">
+                <div>
+                  <h3>建立全局心智模型</h3>
+                  <p class="learning-step__summary">先认清五层结构、四个入口和 PageContext 主轴。</p>
+                </div>
+                <label class="complete-control"><input type="checkbox"><span>已掌握</span></label>
+              </header>
+              <div class="learning-grid">
+                <div class="learning-block"><h4>学习目标</h4><p>能画出 Content、Background、Core、Runtime、UI 的依赖方向。</p></div>
+                <div class="learning-block"><h4>必须能回答</h4><p>为什么 PageContext 是系统唯一的页面业务状态？</p></div>
+                <div class="learning-block"><h4>验收动作</h4><p>不看代码，口述六种状态和每种状态允许的操作。</p></div>
+              </div>
+              <div class="learning-files">
+                <a href="../src/core/types.ts">types.ts</a>
+                <a href="../src/core/page-context.ts">page-context.ts</a>
+                <a href="../src/application/ports.ts">ports.ts</a>
+                <a href="../src/runtime/messages.ts">messages.ts</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="learning-step" data-stage="2" data-complete="false">
+            <div class="learning-step__index">02</div>
+            <div class="learning-step__body">
+              <header class="learning-step__header">
+                <div>
+                  <h3>吃透启动、桥接与页面身份</h3>
+                  <p class="learning-step__summary">跟一次 toolbar click，直到 parsing 状态写入 session。</p>
+                </div>
+                <label class="complete-control"><input type="checkbox"><span>已掌握</span></label>
+              </header>
+              <div class="learning-grid">
+                <div class="learning-block"><h4>学习目标</h4><p>理解 browser message、Bridge、tabId + URL 和 generation。</p></div>
+                <div class="learning-block"><h4>必须能回答</h4><p>为什么普通 window 事件不能启动插件？页面跳转后旧解析为何不会回写？</p></div>
+                <div class="learning-block"><h4>验收动作</h4><p>手画一次 action → content → UI → background 的消息时序图。</p></div>
+              </div>
+              <div class="learning-files">
+                <a href="../entrypoints/content.ts">content.ts</a>
+                <a href="../entrypoints/background.ts">background.ts</a>
+                <a href="../src/runtime/content-assistant-bridge.ts">content-assistant-bridge.ts</a>
+                <a href="../src/core/url.ts">url.ts</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="learning-step" data-stage="3" data-complete="false">
+            <div class="learning-step__index">03</div>
+            <div class="learning-step__body">
+              <header class="learning-step__header">
+                <div>
+                  <h3>掌握网页解析与信息边界</h3>
+                  <p class="learning-step__summary">理解 DOM 如何变成安全、可检索的 ArticleDocument。</p>
+                </div>
+                <label class="complete-control"><input type="checkbox"><span>已掌握</span></label>
+              </header>
+              <div class="learning-grid">
+                <div class="learning-block"><h4>学习目标</h4><p>掌握根节点优先级、过滤、章节路径、回退提取和 partial 判断。</p></div>
+                <div class="learning-block"><h4>必须能回答</h4><p>为什么解析遗漏不能靠后续 RAG 修复？重复标题如何避免串章节？</p></div>
+                <div class="learning-block"><h4>验收动作</h4><p>为一段含 nav、main、table、MathML 的 HTML 手算提取结果。</p></div>
+              </div>
+              <div class="learning-files">
+                <a href="../src/core/article-extractor.ts">article-extractor.ts</a>
+                <a href="../src/core/mathml.ts">mathml.ts</a>
+                <a href="../src/components/ArticleDiagnosticsPanel.tsx">ArticleDiagnosticsPanel.tsx</a>
+                <a href="../tests/core/article-extractor.test.ts">article-extractor.test.ts</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="learning-step" data-stage="4" data-complete="false">
+            <div class="learning-step__index">04</div>
+            <div class="learning-step__body">
+              <header class="learning-step__header">
+                <div>
+                  <h3>理解引用、翻译与视觉输入</h3>
+                  <p class="learning-step__summary">搞清 focus 如何建立、消费、失败保留和历史快照。</p>
+                </div>
+                <label class="complete-control"><input type="checkbox"><span>已掌握</span></label>
+              </header>
+              <div class="learning-grid">
+                <div class="learning-block"><h4>学习目标</h4><p>区分 text、image、region，理解标题引用的 section scope。</p></div>
+                <div class="learning-block"><h4>必须能回答</h4><p>为什么引用是锚点而非边界？截图前后为什么都检查活动标签页？</p></div>
+                <div class="learning-block"><h4>验收动作</h4><p>追踪一次框选区域，从 DOM 坐标直到 image_url 模型输入。</p></div>
+              </div>
+              <div class="learning-files">
+                <a href="../src/core/selection-focus.ts">selection-focus.ts</a>
+                <a href="../src/runtime/screenshot.ts">screenshot.ts</a>
+                <a href="../src/core/conversation-turn.ts">conversation-turn.ts</a>
+                <a href="../src/components/local-image.ts">local-image.ts</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="learning-step" data-stage="5" data-complete="false">
+            <div class="learning-step__index">05</div>
+            <div class="learning-step__body">
+              <header class="learning-step__header">
+                <div>
+                  <h3>掌握 Chunk 与基础检索</h3>
+                  <p class="learning-step__summary">先理解确定性检索，再看模型 Planner。</p>
+                </div>
+                <label class="complete-control"><input type="checkbox"><span>已掌握</span></label>
+              </header>
+              <div class="learning-grid">
+                <div class="learning-block"><h4>学习目标</h4><p>理解结构感知切块、精确匹配、BM25、证据窗口与章节覆盖。</p></div>
+                <div class="learning-block"><h4>必须能回答</h4><p>为什么不固定重叠？为什么表格分块要重复标题和表头？</p></div>
+                <div class="learning-block"><h4>验收动作</h4><p>给定四个章节和一个问题，预测会命中的 Chunk 与邻近窗口。</p></div>
+              </div>
+              <div class="learning-files">
+                <a href="../src/core/retrieval.ts">retrieval.ts</a>
+                <a href="../tests/core/retrieval.test.ts">retrieval.test.ts</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="learning-step" data-stage="6" data-complete="false">
+            <div class="learning-step__index">06</div>
+            <div class="learning-step__body">
+              <header class="learning-step__header">
+                <div>
+                  <h3>吃透统一预算与 Query Planner</h3>
+                  <p class="learning-step__summary">这是回答质量和上下文成本的中央决策层。</p>
+                </div>
+                <label class="complete-control"><input type="checkbox"><span>已掌握</span></label>
+              </header>
+              <div class="learning-grid">
+                <div class="learning-block"><h4>学习目标</h4><p>掌握 full-context、fused-retrieval、RRF、pinned evidence 和降级路径。</p></div>
+                <div class="learning-block"><h4>必须能回答</h4><p>64000 字怎样分配？Planner 失败后系统为什么仍能回答？</p></div>
+                <div class="learning-block"><h4>验收动作</h4><p>构造短文与长文两个样例，手算各自进入哪条编排路径。</p></div>
+              </div>
+              <div class="learning-files">
+                <a href="../src/core/context-assembler.ts">context-assembler.ts</a>
+                <a href="../src/core/query-planner.ts">query-planner.ts</a>
+                <a href="../tests/core/context-assembler.test.ts">context-assembler.test.ts</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="learning-step" data-stage="7" data-complete="false">
+            <div class="learning-step__index">07</div>
+            <div class="learning-step__body">
+              <header class="learning-step__header">
+                <div>
+                  <h3>理解 Prompt、模型边界与 Question Trace</h3>
+                  <p class="learning-step__summary">把最终证据如何变成一次可诊断模型请求串起来。</p>
+                </div>
+                <label class="complete-control"><input type="checkbox"><span>已掌握</span></label>
+              </header>
+              <div class="learning-grid">
+                <div class="learning-block"><h4>学习目标</h4><p>区分 system、历史、文章数据、检查点和多模态内容。</p></div>
+                <div class="learning-block"><h4>必须能回答</h4><p>网页提示注入如何被隔离？Question Trace 为什么不能进入长期归档？</p></div>
+                <div class="learning-block"><h4>验收动作</h4><p>从回答诊断中复原一次实际请求，并指出每条消息的来源。</p></div>
+              </div>
+              <div class="learning-files">
+                <a href="../src/core/prompts.ts">prompts.ts</a>
+                <a href="../src/runtime/model-client.ts">model-client.ts</a>
+                <a href="../src/core/question-trace.ts">question-trace.ts</a>
+                <a href="../src/components/MessageContent.tsx">MessageContent.tsx</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="learning-step" data-stage="8" data-complete="false">
+            <div class="learning-step__index">08</div>
+            <div class="learning-step__body">
+              <header class="learning-step__header">
+                <div>
+                  <h3>掌握 N 轮记忆与持久化生命周期</h3>
+                  <p class="learning-step__summary">理解完整历史、窗口历史、检查点和归档的四层关系。</p>
+                </div>
+                <label class="complete-control"><input type="checkbox"><span>已掌握</span></label>
+              </header>
+              <div class="learning-grid">
+                <div class="learning-block"><h4>学习目标</h4><p>掌握最近轮、相关旧轮、增量检查点、session/local 与删除同步。</p></div>
+                <div class="learning-block"><h4>必须能回答</h4><p>“讲下一个”如何在旧原文离开窗口后仍然正确？删除记录为何要清 session？</p></div>
+                <div class="learning-block"><h4>验收动作</h4><p>模拟十轮任务，标出第八轮请求中的原文、召回历史和 checkpoint。</p></div>
+              </div>
+              <div class="learning-files">
+                <a href="../src/core/conversation-memory.ts">conversation-memory.ts</a>
+                <a href="../src/core/conversation-checkpoint.ts">conversation-checkpoint.ts</a>
+                <a href="../src/runtime/context-repository.ts">context-repository.ts</a>
+                <a href="../src/application/operation-version.ts">operation-version.ts</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="learning-step" data-stage="9" data-complete="false">
+            <div class="learning-step__index">09</div>
+            <div class="learning-step__body">
+              <header class="learning-step__header">
+                <div>
+                  <h3>最后回到三套 UI 与工程验收</h3>
+                  <p class="learning-step__summary">在理解状态来源后，再看大型组件如何表现和同步状态。</p>
+                </div>
+                <label class="complete-control"><input type="checkbox"><span>已掌握</span></label>
+              </header>
+              <div class="learning-grid">
+                <div class="learning-block"><h4>学习目标</h4><p>掌握浮窗、工作台、学习记录的职责差异和共享上下文方式。</p></div>
+                <div class="learning-block"><h4>必须能回答</h4><p>为什么跨视图回答不重播动画？用户滚动后为何停止自动跟随？</p></div>
+                <div class="learning-block"><h4>验收动作</h4><p>完成一次真实网页矩阵测试，并用 Question Trace 定位一条失败链路。</p></div>
+              </div>
+              <div class="learning-files">
+                <a href="../src/components/FloatingAssistant.tsx">FloatingAssistant.tsx</a>
+                <a href="../src/components/StudyWorkspace.tsx">StudyWorkspace.tsx</a>
+                <a href="../src/components/HistoryLibrary.tsx">HistoryLibrary.tsx</a>
+                <a href="../tests/components/floating-assistant.test.tsx">组件测试</a>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <p>Context Reader 工程学习地图</p>
+      <p>事实基线：<code>main@9f103e8</code></p>
+    </div>
+  </footer>
+
+  <script>
+    const progressKey = "context-reader:project-learning-progress";
+    const stages = Array.from(document.querySelectorAll(".learning-step"));
+    const progressBar = document.querySelector("#progress-bar");
+    const progressCount = document.querySelector("#progress-count");
+    const progressPercent = document.querySelector("#progress-percent");
+    const collapseButton = document.querySelector("#collapse-all");
+    const resetButton = document.querySelector("#reset-progress");
+
+    function savedProgress() {
+      try {
+        return JSON.parse(localStorage.getItem(progressKey) || "[]");
+      } catch {
+        return [];
+      }
+    }
+
+    function updateProgress() {
+      const completed = stages.filter((stage) => {
+        const checkbox = stage.querySelector('input[type="checkbox"]');
+        const checked = Boolean(checkbox && checkbox.checked);
+        stage.dataset.complete = String(checked);
+        return checked;
+      });
+      const percentage = Math.round((completed.length / stages.length) * 100);
+      progressBar.style.width = `${percentage}%`;
+      progressCount.textContent = `${completed.length} / ${stages.length}`;
+      progressPercent.textContent = `${percentage}%`;
+      try {
+        localStorage.setItem(
+          progressKey,
+          JSON.stringify(completed.map((stage) => stage.dataset.stage)),
+        );
+      } catch {
+        // Progress remains usable for this page session when file storage is blocked.
+      }
+    }
+
+    const completedStages = new Set(savedProgress());
+    for (const stage of stages) {
+      const checkbox = stage.querySelector('input[type="checkbox"]');
+      if (!checkbox) continue;
+      checkbox.checked = completedStages.has(stage.dataset.stage);
+      checkbox.addEventListener("change", updateProgress);
+    }
+    updateProgress();
+
+    collapseButton?.addEventListener("click", () => {
+      const list = document.querySelector(".learning-list");
+      if (!list) return;
+      const collapsed = list.hidden;
+      list.hidden = !collapsed;
+      collapseButton.textContent = collapsed ? "收起学习详情" : "展开学习详情";
+    });
+
+    resetButton?.addEventListener("click", () => {
+      for (const stage of stages) {
+        const checkbox = stage.querySelector('input[type="checkbox"]');
+        if (checkbox) checkbox.checked = false;
+      }
+      updateProgress();
+    });
+  </script>
+</body>
+</html>
